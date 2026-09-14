@@ -368,13 +368,22 @@ function tick(block, now, ctx) {
 // block still at its full length adopts the new length, a paused block with
 // partial progress keeps its remaining time, and a running block keeps the
 // deadline it started with.
+//
+// A running block also keeps the length it was armed from. `armedMs` is what
+// the pause rule measures "has this block started?" against, so re-arming it
+// mid-run would let a shorter value written while the user was working become
+// the paused block's length: 40:00 armed, 39:00 genuinely left, the settings
+// moved to 25 mid-run and then to 30 while paused, and the user's 39 minutes of
+// real work is silently rewritten to 30:00. The length a running block was
+// started into is a fact about that run, not a setting, so it stays put; the
+// next start, phase transition and LOAD all re-arm from the settings as before.
 function settingsChanged(block, settings) {
+  if (block.running === true) return unchanged(block)
   var length = model().phaseLengthMs(settings, block.phase)
   if (length === block.armedMs) return unchanged(block)
   var next = copy(block)
-  next.armedMs = length
-  if (block.running === true) return { block: next, effects: [] }
   next.pausedMs = pausedMsAfterSettingsChange(block.pausedMs, block.armedMs, length)
+  next.armedMs = length
   return { block: next, effects: [{ kind: "persist" }] }
 }
 

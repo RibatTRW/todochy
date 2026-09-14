@@ -365,6 +365,15 @@ function recentDays(state, epochMs, count) {
 
 // ---------------------------------------------------------------- settings
 
+function pausedMsAfterSettingsChange(remaining, oldPhaseLength, newPhaseLength) {
+  var r = Number(remaining)
+  if (!isFinite(r) || r <= 0) return newPhaseLength
+  var old = Number(oldPhaseLength)
+  if (!isFinite(old) || old <= 0) return newPhaseLength
+  if (r >= old) return newPhaseLength
+  return r
+}
+
 function normalizeSettings(values) {
   var v = isPlainObject(values) ? values : {}
   return {
@@ -412,6 +421,7 @@ if (typeof module !== "undefined" && module.exports) {
     applyWorkBlockCompleted: applyWorkBlockCompleted,
     displayStreak: displayStreak,
     recentDays: recentDays,
+    pausedMsAfterSettingsChange: pausedMsAfterSettingsChange,
     normalizeSettings: normalizeSettings
   }
 }

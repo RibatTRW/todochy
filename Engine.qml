@@ -282,6 +282,7 @@ QtObject {
   // widget; shell.json itself is never written directly.
   function setSetting(key, value) {
     if (!host) return
+    var oldLength = Model.phaseLengthMs(effectiveSettings, phase)
     var merged = { id: moduleName }
     var current = hostSettings || {}
     for (var k in current) if (k !== "id") merged[k] = current[k]
@@ -289,8 +290,8 @@ QtObject {
     host.settings = merged
     if (host.bar && host.bar.shell && typeof host.bar.shell.updateEntryInline === "function")
       host.bar.shell.updateEntryInline(moduleName, merged)
-    if (!running && !(pausedMs > 0)) {
-      pausedMs = Model.phaseLengthMs(effectiveSettings, phase)
+    if (!running) {
+      pausedMs = Model.pausedMsAfterSettingsChange(pausedMs, oldLength, Model.phaseLengthMs(effectiveSettings, phase))
       nowMs = Date.now()
     }
     save()

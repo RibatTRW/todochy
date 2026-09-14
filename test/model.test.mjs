@@ -251,3 +251,11 @@ test("a task added after its predecessor is done receives the next completed blo
   assert.equal(credited[0].pomos, 1)
   assert.equal(credited[1].pomos, 1)
 })
+
+test("a settings change keeps partial progress but refreshes a fresh block", () => {
+  const minute = 60 * 1000
+  assert.equal(Model.pausedMsAfterSettingsChange(10 * minute, 25 * minute, 50 * minute), 10 * minute)
+  assert.equal(Model.pausedMsAfterSettingsChange(0, 5 * minute, 10 * minute), 10 * minute)
+  assert.equal(Model.pausedMsAfterSettingsChange(5 * minute, 5 * minute, 10 * minute), 10 * minute)
+  assert.equal(Model.pausedMsAfterSettingsChange(30 * minute, 25 * minute, 50 * minute), 50 * minute)
+})

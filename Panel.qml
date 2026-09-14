@@ -70,7 +70,10 @@ Panel {
       blocked: taskInput.activeFocus
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
-      onReturnRequested: if (root.engine) root.engine.toggleRunning()
+      // PanelKeyCatcher emits returnRequested *and* activateRequested for one
+      // Return, so only the activate handler may drive the timer: wiring both
+      // started the block and paused it again in the same keystroke. Space
+      // emits activateRequested alone, so both keys now toggle exactly once.
       onActivateRequested: if (root.engine) root.engine.toggleRunning()
 
       Column {

@@ -34,6 +34,30 @@ QtObject {
   readonly property int longBreakMinutes: effectiveSettings.longBreakMinutes
   readonly property int longBreakEvery: effectiveSettings.longBreakEvery
 
+  // Phase length the current countdown was armed from. Settings also change
+  // from outside this panel — `omarchy bar set`, or shell.json edited by hand —
+  // which updates `effectiveSettings` without ever calling setSetting. An idle
+  // block still at its full length adopts the new length, a paused one keeps
+  // its remaining time, and a running one keeps the deadline it started with.
+  property double lastPhaseLengthMs: 0
+
+  onEffectiveSettingsChanged: engine.phaseLengthChanged()
+
+  function phaseLengthChanged() {
+    var next = Model.phaseLengthMs(effectiveSettings, phase)
+    if (next === lastPhaseLengthMs) return
+    if (!ready) {
+      lastPhaseLengthMs = next
+      return
+    }
+    if (!running) {
+      pausedMs = Model.pausedMsAfterSettingsChange(pausedMs, lastPhaseLengthMs, next)
+      nowMs = Date.now()
+      save()
+    }
+    lastPhaseLengthMs = next
+  }
+
   // ------------------------------------------------------------------ state
 
   property var tasks: []
@@ -181,6 +205,7 @@ QtObject {
     running = false
     deadlineMs = 0
     pausedMs = Model.phaseLengthMs(effectiveSettings, phase)
+    lastPhaseLengthMs = pausedMs
     nowMs = Date.now()
     save()
   }
@@ -205,6 +230,7 @@ QtObject {
     running = false
     deadlineMs = 0
     pausedMs = Model.phaseLengthMs(effectiveSettings, phase)
+    lastPhaseLengthMs = pausedMs
     nowMs = now
     if (natural) notifyBlockEnd()
     save()
@@ -294,6 +320,7 @@ QtObject {
       pausedMs = Model.pausedMsAfterSettingsChange(pausedMs, oldLength, Model.phaseLengthMs(effectiveSettings, phase))
       nowMs = Date.now()
     }
+    lastPhaseLengthMs = Model.phaseLengthMs(effectiveSettings, phase)
     save()
   }
 
@@ -362,6 +389,7 @@ QtObject {
       if (pausedMs <= 0) pausedMs = Model.phaseLengthMs(effectiveSettings, phase)
     }
 
+    lastPhaseLengthMs = Model.phaseLengthMs(effectiveSettings, phase)
     ready = true
     save()
   }

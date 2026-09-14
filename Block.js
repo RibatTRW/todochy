@@ -31,7 +31,9 @@
 //
 // The block value is the state.json v1 shape plus `armedMs`. `armedMs` is
 // deliberately not persisted: it is re-armed from the settings on every load,
-// every phase transition and every settings change. serialize() writes v1
+// every phase transition and every settings change received while the block is
+// not running. A change that arrives mid-run leaves it untouched, so the length
+// the run was armed from stays put. serialize() writes v1
 // byte-for-byte, and the round-trip test in test/block.test.mjs pins it.
 
 // A run that expired while the shell was down still completes, but only if it

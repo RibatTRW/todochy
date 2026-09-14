@@ -34,12 +34,9 @@ Panel {
   readonly property int heroSize: Math.round(Style.font.displayLarge * 2)
 
   readonly property int tasksTotal: engine ? engine.tasks.length : 0
-  readonly property int tasksDone: {
-    var list = engine ? engine.tasks : []
-    var done = 0
-    for (var i = 0; i < list.length; i++) if (list[i].done) done++
-    return done
-  }
+  // Derived by the engine, which owns the task list; the panel no longer
+  // recounts on its own binding.
+  readonly property int tasksDone: engine ? engine.tasksDone : 0
 
   function dots(count) {
     var text = ""

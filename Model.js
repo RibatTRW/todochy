@@ -195,13 +195,20 @@ function nextIncompleteTaskId(tasks, excludeId) {
 
 // ------------------------------------------------------- the streak's display
 
+// The streak rule, resolved against a day the caller already knows. A surface
+// that tracks the day itself (the engine's ticker rolls `todayKey`) derives the
+// streak through this without reading the clock, so the value recomputes only
+// when the counters or the day move — not on every 250 ms tick.
+function displayStreakOnDay(currentStreak, lastCountedDay, todayKey) {
+  if (lastCountedDay === todayKey) return currentStreak
+  if (lastCountedDay === previousDayKey(todayKey)) return currentStreak
+  return 0
+}
+
 // What the user should see. A streak stays alive through today when the last
 // counted day was yesterday; anything older means the chain is broken.
 function displayStreak(state, epochMs) {
-  var today = dayKey(epochMs)
-  if (state.lastCountedDay === today) return state.currentStreak
-  if (state.lastCountedDay === previousDayKey(today)) return state.currentStreak
-  return 0
+  return displayStreakOnDay(state.currentStreak, state.lastCountedDay, dayKey(epochMs))
 }
 
 function recentDays(state, epochMs, count) {
@@ -250,6 +257,7 @@ if (typeof module !== "undefined" && module.exports) {
     previousDayKey: previousDayKey,
     recentDays: recentDays,
     displayStreak: displayStreak,
+    displayStreakOnDay: displayStreakOnDay,
     // Task rules. Task CRUD in Engine.qml and the completion chain in Block.js
     // both call these.
     normalizeTask: normalizeTask,

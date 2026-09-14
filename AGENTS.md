@@ -17,6 +17,13 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - **`state.json` is schema v1 and byte-frozen.** Its shape and its parse/serialize mapping
   live in `Block.js`; `test/block.test.mjs` pins the bytes. A schema change needs its own
   decision, not a drive-by edit.
+- **The displayed derived surface must not read the clock.** `Engine.qml` derives the streak
+  from `block.todayKey` / `block.lastCountedDay` / `block.currentStreak` through
+  `Model.displayStreakOnDay`, and owns `tasksDone` itself, so `Panel.qml` binds to both
+  instead of recounting. Reading `nowMs` there made the 250 ms ticker recompute the streak
+  four times a second (measured: 36 evaluations per 8 s before, 3 after). `Block.reduce`
+  rolls `block.todayKey` at midnight, so the day-rollover edge still moves the streak;
+  `test/derived-view.test.mjs` pins the day-key rule to the clock-based one.
 - **Checks:** `node --test test/*.test.mjs` and the `qmllint` line in `.no-mistakes.yaml`
   (mirrored in `.github/workflows/ci.yml`). Both must be green.
 - **QML can only reach a second JS library through a `.import` directive**, which is invalid

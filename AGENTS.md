@@ -31,7 +31,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   JavaScript, so `Block.js` stays `require`-able by node and takes the `Model` namespace from
   `Engine.qml` at runtime (`Block.bindModel(Model)`).
 - `Model.js` holds the pure helpers `Block.js` composes plus the alarm's sound choice, volume, repeat spacing and fallback command, and is what `test/model.test.mjs` covers. `Engine.qml` is the adapter that rings `Alarm.qml` on the work-completed effect and on a task marked complete, `Panel.qml` owns the UI, and `SoundPlayer.qml` is the only file importing QtMultimedia (loaded behind a Loader, so a machine without `qt6-multimedia` cannot break the widget).
-- The alarm's volume maps linearly: `soundVolume / 100` is the player's volume, so the bundled files' peaks (−1.5 dBFS chime, −2.2 dBFS two-note) show up as `peak + 20·log10(v)` on the sink monitor. That is how a captured recording verifies the setting.
+- The alarm's in-process volume maps linearly: `soundVolume / 100` is the player's volume, so the bundled files' peaks (−1.5 dBFS chime, −2.2 dBFS two-note) show up as `peak + 20·log10(v)` on the sink monitor. That is how a captured recording verifies the setting.
 
 ## Testing against the running shell
 

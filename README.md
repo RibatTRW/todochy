@@ -131,8 +131,11 @@ abandoned rather than credited to the streak.
   Multimedia, so it needs `qt6-multimedia` — not an Omarchy dependency, and the reason the
   plugin has a second path. Without it, todochy falls back to the first external player it
   finds (`mpv`, `pw-play`, `paplay`, `ffplay`, `canberra-gtk-play`, `aplay`); with none of
-  those the alarm stays silent instead of failing, and the gear panel says so. The two
-  bundled sounds in `assets/sounds/` are original synthesised works, synthesised from
+  those the alarm stays silent instead of failing, and the gear panel says so. On that
+  fallback path the volume setting scales `mpv`, `pw-play` and `paplay` only —
+  `ffplay`, `canberra-gtk-play` and `aplay` take no volume flag and play at their own
+  level — except that volume 0 mutes the alarm on every player. The two bundled
+  sounds in `assets/sounds/` are original synthesised works, synthesised from
   scratch for this plugin, and ship under its MIT licence.
 - **No sync, accounts, projects, due dates or priorities.** That is the point.
 - The plugin is a single `bar-widget`; the panel is `Panel.qml` loaded by `BarWidget.qml`, not

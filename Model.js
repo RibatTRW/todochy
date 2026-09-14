@@ -369,8 +369,10 @@ function fileUrlToPath(url) {
   try { return decodeURIComponent(rest) } catch (e) { return rest }
 }
 
-// The command for the external fallback. Each player spells its volume flag
-// differently, and aplay has none at all.
+// The command for the external fallback. mpv, pw-play and paplay each spell
+// their volume flag differently; ffplay, canberra-gtk-play and aplay take
+// none, so the setting only scales the first three — except that volume 0
+// mutes every player by returning no command.
 function fallbackCommand(player, volume, path) {
   var p = typeof player === "string" ? player : ""
   var file = typeof path === "string" ? path : ""

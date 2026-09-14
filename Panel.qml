@@ -473,6 +473,8 @@ Panel {
                 options: Model.SOUND_CHOICES
                 value: root.engine ? root.engine.soundTaskDone : ""
                 foreground: root.textColor
+                enabled: root.engine ? !root.engine.soundSameForBoth : true
+                opacity: root.engine && root.engine.soundSameForBoth ? 0.4 : 1
                 onChanged: function(value) {
                   if (root.engine) root.engine.setSetting("soundTaskDone", value)
                 }

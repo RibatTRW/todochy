@@ -376,6 +376,7 @@ function fallbackCommand(player, volume, path) {
   var file = typeof path === "string" ? path : ""
   if (p === "" || file === "") return []
   var pct = clampInt(volume, MIN_ALARM_VOLUME, MAX_ALARM_VOLUME, DEFAULT_SOUND_SETTINGS.soundVolume)
+  if (pct === 0) return []
   var v = pct / 100
   var name = p.split("/").pop()
   if (name === "mpv") return [p, "--no-video", "--really-quiet", "--volume=" + String(pct), file]

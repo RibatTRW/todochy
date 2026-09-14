@@ -139,7 +139,8 @@ QtObject {
       inProcess.item.play(kind)
     } else if (which === "external") {
       var file = Model.fileUrlToPath(assetDir + id + ".wav")
-      Quickshell.execDetached(Model.fallbackCommand(externalPlayer, volumePercent, file))
+      var cmd = Model.fallbackCommand(externalPlayer, volumePercent, file)
+      if (cmd.length > 0) Quickshell.execDetached(cmd)
     }
     var remaining = left - 1
     setPlaysLeft(kind, remaining)

@@ -36,4 +36,4 @@ jobs:
 
       - name: Test
         run: |
-          node --test test/
+          node --test test/*.test.mjs

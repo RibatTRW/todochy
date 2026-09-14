@@ -22,11 +22,18 @@ from the active Omarchy theme, so the widget follows the user's theme with no co
   written to `~/.local/state/omarchy/todochy/state.json`.
 - **Notifications** — one toast per block end, replaced in place rather than stacked, with a
   click action that opens the panel.
+- **Alarm sounds** — two events and no others: a work block ending, and a task being marked
+  complete. Each alarm plays twice by default, at a volume you choose. Starting, pausing,
+  skipping and resetting stay silent.
 
 ## Requirements
 
 Omarchy with the Quattro shell (`omarchy-shell`). The plugin uses only the shell's own
 `qs.Ui` / `qs.Commons` components, `omarchy-notification-send`, and `mkdir`.
+
+The alarm is optional infrastructure-wise: it plays in-process through `qt6-multimedia`
+when that package is installed, falls back to an external player when it is not, and stays
+silent when neither exists. Nothing else about the widget depends on either.
 
 ## Install
 
@@ -52,7 +59,7 @@ omarchy bar move ribattrw.todochy --section right
 | Pill | middle click | skip the current block |
 | Panel | click a task | make it current, or mark the current task complete |
 | Panel | `add task` field | type and press Enter |
-| Panel | gear button | show or hide the interval settings |
+| Panel | gear button | show or hide the interval and sound settings |
 | Panel | start / skip / reset | control the block |
 | Panel | Escape | close the panel |
 
@@ -78,6 +85,10 @@ omarchy bar set ribattrw.todochy workMinutes 50
 omarchy bar set ribattrw.todochy shortBreakMinutes 10
 omarchy bar set ribattrw.todochy longBreakMinutes 20
 omarchy bar set ribattrw.todochy longBreakEvery 2
+omarchy bar set ribattrw.todochy soundEnabled false
+omarchy bar set ribattrw.todochy soundTaskDone block-chime-clean
+omarchy bar set ribattrw.todochy soundRepeat 3
+omarchy bar set ribattrw.todochy soundVolume 90
 ```
 
 | Key | Default | Meaning |
@@ -86,6 +97,15 @@ omarchy bar set ribattrw.todochy longBreakEvery 2
 | `shortBreakMinutes` | `5` | length of a short break |
 | `longBreakMinutes` | `15` | length of a long break |
 | `longBreakEvery` | `4` | work blocks completed before a long break |
+| `soundEnabled` | `true` | play an alarm at all |
+| `soundBlockEnd` | `block-chime-clean` | sound for a work block ending |
+| `soundTaskDone` | `task-two-note` | sound for a task marked complete |
+| `soundSameForBoth` | `false` | use the block-end sound for both events |
+| `soundRepeat` | `2` | how many times each alarm plays, 1-3, with a short gap between plays |
+| `soundVolume` | `55` | alarm volume, 0-100; it never touches the system volume |
+
+Both sound keys take either of the two bundled sounds, `block-chime-clean` or
+`task-two-note`, so the two events can be swapped or made identical.
 
 Settings are stored on the widget's entry in `~/.config/omarchy/shell.json`. Every value falls
 back to its default when missing, so the plugin works with an empty entry. A change takes
@@ -106,8 +126,14 @@ abandoned rather than credited to the streak.
 
 ## Notes
 
-- **No sound.** Block ends are announced with a desktop notification only. Omarchy's shell
-  exposes no verified sound surface, so todochy does not play one and does not ship audio.
+- **Sound plays on exactly two events**, a work block ending and a task being marked
+  complete; a skipped or reset block makes no sound. The alarm plays in-process through Qt
+  Multimedia, so it needs `qt6-multimedia` — not an Omarchy dependency, and the reason the
+  plugin has a second path. Without it, todochy falls back to the first external player it
+  finds (`mpv`, `pw-play`, `paplay`, `ffplay`, `canberra-gtk-play`, `aplay`); with none of
+  those the alarm stays silent instead of failing, and the gear panel says so. The two
+  bundled sounds in `assets/sounds/` are original synthesised works, synthesised from
+  scratch for this plugin, and ship under its MIT licence.
 - **No sync, accounts, projects, due dates or priorities.** That is the point.
 - The plugin is a single `bar-widget`; the panel is `Panel.qml` loaded by `BarWidget.qml`, not
   a second plugin kind.
@@ -124,14 +150,18 @@ node --test test/*.test.mjs                   # the lifecycle and the rules
 change arriving mid-block, the six-hour catch-up window, and the whole consequence chain of a
 finished work block — as one pure reducer that returns the next block plus the effects the
 caller must perform. `Model.js` holds the pure helpers it composes (settings clamping, phase
-lengths, formatting, calendar days, streak arithmetic, task rules). `test/block.test.mjs`
-drives the lifecycle with an injected clock, `test/model.test.mjs` the helpers, and
+lengths, formatting, calendar days, streak arithmetic, task rules) plus the alarm's sound
+choice, volume, repeat spacing and fallback command. `test/block.test.mjs` drives the
+lifecycle with an injected clock, `test/model.test.mjs` the helpers, and
 `test/equivalence.test.mjs` pins the whole seam against a frozen copy of the engine as it
 behaved before that refactor.
 
 `Engine.qml` is the adapter: the ticker, the file IO, the notification process and the
-read-only projection of the block value onto the properties the panel binds to. `Panel.qml`
-owns the UI. `CONTEXT.md` has the vocabulary.
+read-only projection of the block value onto the properties the panel binds to — including
+ringing `Alarm.qml` on the work-completed effect and on a task marked complete.
+`Panel.qml` owns the UI, `Alarm.qml` owns the two audible events, and `SoundPlayer.qml` is
+the in-process player it loads — the only file that imports QtMultimedia, so a machine
+without that package cannot break the widget. `CONTEXT.md` has the vocabulary.
 
 To lint against the installed shell, an import root shaped like the `qs.*` module names is
 needed, because the shell's module directories are `shell/Commons` and `shell/Ui` while the
@@ -141,7 +171,7 @@ imports are `qs.Commons` and `qs.Ui`:
 mkdir -p .lint-import/qs
 ln -sfn "$OMARCHY_PATH/shell/Commons" .lint-import/qs/Commons
 ln -sfn "$OMARCHY_PATH/shell/Ui"      .lint-import/qs/Ui
-qmllint -I "$OMARCHY_PATH/shell" -I "$PWD/.lint-import" BarWidget.qml Engine.qml Panel.qml
+qmllint -I "$OMARCHY_PATH/shell" -I "$PWD/.lint-import" BarWidget.qml Engine.qml Panel.qml Alarm.qml SoundPlayer.qml
 ```
 
 Do not commit `.lint-import` — the plugin validator rejects symlinks inside a plugin folder.

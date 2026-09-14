@@ -236,6 +236,157 @@ function normalizeSettings(values) {
   }
 }
 
+// ------------------------------------------------------------------ sound
+
+// The alarm fires on two events and no others: a work block ending and a task
+// being marked complete. Everything about it is a setting, so these are the
+// values a missing or hand-edited shell.json entry falls back to.
+var DEFAULT_SOUND_SETTINGS = {
+  soundEnabled: true,
+  soundSameForBoth: false,
+  soundBlockEnd: "block-chime-clean",
+  soundTaskDone: "task-two-note",
+  soundRepeat: 2,
+  soundVolume: 55
+}
+
+// The sounds bundled in assets/sounds/. Both are original synthesised works
+// that ship under this plugin's licence.
+var SOUND_CHOICES = [
+  { value: "block-chime-clean", label: "Chime (clean)" },
+  { value: "task-two-note", label: "Two-note callback" }
+]
+
+// Measured lengths of the shipped files. They are what schedules the repeat:
+// the next play waits for the whole sound plus the gap, so a repeat can never
+// start on top of the one before it.
+var SOUND_DURATIONS_MS = {
+  "block-chime-clean": 1550,
+  "task-two-note": 780
+}
+
+var SOUND_GAP_MS = 350
+var MIN_ALARM_REPEAT = 1
+var MAX_ALARM_REPEAT = 3
+var MIN_ALARM_VOLUME = 0
+var MAX_ALARM_VOLUME = 100
+
+// Booleans arrive either typed (from the manifest defaults) or as strings (from
+// the widget's inline shell.json entry), so `Boolean(value)` is wrong here:
+// Boolean("false") is true. Only recognised spellings count; anything else is
+// the fallback.
+function tolerantBool(value, fallback) {
+  if (value === true || value === false) return value
+  if (typeof value === "number") {
+    if (value === 1) return true
+    if (value === 0) return false
+    return fallback
+  }
+  if (typeof value === "string") {
+    var v = value.trim().toLowerCase()
+    if (v === "true" || v === "on" || v === "yes" || v === "1") return true
+    if (v === "false" || v === "off" || v === "no" || v === "0") return false
+  }
+  return fallback
+}
+
+function isKnownSoundId(value) {
+  for (var i = 0; i < SOUND_CHOICES.length; i++) {
+    if (SOUND_CHOICES[i].value === value) return true
+  }
+  return false
+}
+
+// A sound the plugin does not ship is never played: a stale or hand-edited id
+// falls back to the default rather than pointing a player at a missing file.
+function soundIdOr(value, fallback) {
+  return isKnownSoundId(value) ? value : fallback
+}
+
+function normalizeSoundSettings(values) {
+  var v = isPlainObject(values) ? values : {}
+  return {
+    soundEnabled: tolerantBool(v.soundEnabled, DEFAULT_SOUND_SETTINGS.soundEnabled),
+    soundSameForBoth: tolerantBool(v.soundSameForBoth, DEFAULT_SOUND_SETTINGS.soundSameForBoth),
+    soundBlockEnd: soundIdOr(v.soundBlockEnd, DEFAULT_SOUND_SETTINGS.soundBlockEnd),
+    soundTaskDone: soundIdOr(v.soundTaskDone, DEFAULT_SOUND_SETTINGS.soundTaskDone),
+    soundRepeat: clampInt(v.soundRepeat, MIN_ALARM_REPEAT, MAX_ALARM_REPEAT, DEFAULT_SOUND_SETTINGS.soundRepeat),
+    soundVolume: clampInt(v.soundVolume, MIN_ALARM_VOLUME, MAX_ALARM_VOLUME, DEFAULT_SOUND_SETTINGS.soundVolume)
+  }
+}
+
+// Which bundled sound an event plays. `kind` is "block" for a work block
+// ending or "task" for a task being marked complete. With soundSameForBoth the
+// task event borrows the block sound, so the two can be made identical without
+// a second choice.
+function soundForEvent(settings, kind) {
+  var s = normalizeSoundSettings(settings)
+  if (kind !== "task") return s.soundBlockEnd
+  return s.soundSameForBoth ? s.soundBlockEnd : s.soundTaskDone
+}
+
+// The 0-100 setting maps straight onto the player's 0-1 volume: the response is
+// linear in amplitude, so no perceptual curve is needed on the way.
+function soundVolumeScale(percent) {
+  var n = Number(percent)
+  if (!isFinite(n)) n = DEFAULT_SOUND_SETTINGS.soundVolume
+  return clampInt(n, MIN_ALARM_VOLUME, MAX_ALARM_VOLUME, DEFAULT_SOUND_SETTINGS.soundVolume) / 100
+}
+
+// How many times one alarm plays. The captain asked to hear it twice; the cap
+// keeps a hand-edited value from turning a block end into a siren.
+function alarmPlays(repeat) {
+  return clampInt(repeat, MIN_ALARM_REPEAT, MAX_ALARM_REPEAT, DEFAULT_SOUND_SETTINGS.soundRepeat)
+}
+
+function soundDurationMs(id) {
+  var d = SOUND_DURATIONS_MS[id]
+  return (typeof d === "number" && isFinite(d) && d > 0) ? d : 0
+}
+
+// The delay between two plays of one alarm: the sound's whole length plus the
+// gap, so the second play follows the first rather than overlapping it.
+function alarmRepeatIntervalMs(durationMs, gapMs) {
+  var d = Math.max(0, finiteOr(durationMs, 0))
+  var g = Math.max(0, finiteOr(gapMs, SOUND_GAP_MS))
+  return d + g
+}
+
+// Playback tier: the in-process player first, an external player only when it
+// is unavailable, and silence when neither exists.
+function alarmTier(inProcessReady, externalPlayer) {
+  if (inProcessReady) return "in-process"
+  if (typeof externalPlayer === "string" && externalPlayer !== "") return "external"
+  return "silent"
+}
+
+// A file:// URL as a filesystem path, for the external players, which take a
+// path rather than a URL.
+function fileUrlToPath(url) {
+  var s = typeof url === "string" ? url : ""
+  if (s.indexOf("file://") !== 0) return s
+  var rest = s.slice("file://".length)
+  try { return decodeURIComponent(rest) } catch (e) { return rest }
+}
+
+// The command for the external fallback. Each player spells its volume flag
+// differently, and aplay has none at all.
+function fallbackCommand(player, volume, path) {
+  var p = typeof player === "string" ? player : ""
+  var file = typeof path === "string" ? path : ""
+  if (p === "" || file === "") return []
+  var pct = clampInt(volume, MIN_ALARM_VOLUME, MAX_ALARM_VOLUME, DEFAULT_SOUND_SETTINGS.soundVolume)
+  var v = pct / 100
+  var name = p.split("/").pop()
+  if (name === "mpv") return [p, "--no-video", "--really-quiet", "--volume=" + String(pct), file]
+  if (name === "pw-play") return [p, "--volume=" + String(v), file]
+  if (name === "paplay") return [p, "--volume=" + String(Math.round(v * 65536)), file]
+  if (name === "ffplay") return [p, "-nodisp", "-autoexit", "-loglevel", "quiet", file]
+  if (name === "canberra-gtk-play") return [p, "-f", file]
+  if (name === "aplay") return [p, "-q", file]
+  return [p, file]
+}
+
 // ---------------------------------------------------------------- exports
 
 if (typeof module !== "undefined" && module.exports) {
@@ -264,6 +415,23 @@ if (typeof module !== "undefined" && module.exports) {
     hasTask: hasTask,
     creditCurrentTask: creditCurrentTask,
     currentTaskIdAfterAdd: currentTaskIdAfterAdd,
-    nextIncompleteTaskId: nextIncompleteTaskId
+    nextIncompleteTaskId: nextIncompleteTaskId,
+    // Alarm sound rules. Engine.qml and Alarm.qml read these.
+    DEFAULT_SOUND_SETTINGS: DEFAULT_SOUND_SETTINGS,
+    SOUND_CHOICES: SOUND_CHOICES,
+    SOUND_DURATIONS_MS: SOUND_DURATIONS_MS,
+    SOUND_GAP_MS: SOUND_GAP_MS,
+    tolerantBool: tolerantBool,
+    isKnownSoundId: isKnownSoundId,
+    soundIdOr: soundIdOr,
+    normalizeSoundSettings: normalizeSoundSettings,
+    soundForEvent: soundForEvent,
+    soundVolumeScale: soundVolumeScale,
+    alarmPlays: alarmPlays,
+    soundDurationMs: soundDurationMs,
+    alarmRepeatIntervalMs: alarmRepeatIntervalMs,
+    alarmTier: alarmTier,
+    fileUrlToPath: fileUrlToPath,
+    fallbackCommand: fallbackCommand
   }
 }

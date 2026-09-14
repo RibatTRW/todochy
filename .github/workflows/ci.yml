@@ -32,7 +32,7 @@ jobs:
 
       - name: Lint
         run: |
-          QMLLINT="$(command -v qmllint || command -v qmllint6 || echo /usr/lib/qt6/bin/qmllint)"; "$QMLLINT" BarWidget.qml Engine.qml Panel.qml
+          QMLLINT="$(command -v qmllint || command -v qmllint6 || echo /usr/lib/qt6/bin/qmllint)"; "$QMLLINT" BarWidget.qml Engine.qml Panel.qml Alarm.qml SoundPlayer.qml
 
       - name: Test
         run: |

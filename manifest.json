@@ -22,7 +22,13 @@
       "workMinutes": 25,
       "shortBreakMinutes": 5,
       "longBreakMinutes": 15,
-      "longBreakEvery": 4
+      "longBreakEvery": 4,
+      "soundEnabled": true,
+      "soundSameForBoth": false,
+      "soundBlockEnd": "block-chime-clean",
+      "soundTaskDone": "task-two-note",
+      "soundRepeat": 2,
+      "soundVolume": 55
     },
     "schema": [
       {
@@ -64,6 +70,56 @@
         "max": 24,
         "step": 1,
         "defaultValue": 4
+      },
+      {
+        "key": "soundEnabled",
+        "type": "boolean",
+        "label": "Alarm sounds",
+        "description": "Play an alarm when a work block ends and when a task is marked complete.",
+        "defaultValue": true
+      },
+      {
+        "key": "soundBlockEnd",
+        "type": "enum",
+        "label": "Sound when a work block ends",
+        "description": "Played when a work block runs out and a break begins.",
+        "options": ["block-chime-clean", "task-two-note"],
+        "defaultValue": "block-chime-clean"
+      },
+      {
+        "key": "soundTaskDone",
+        "type": "enum",
+        "label": "Sound when a task is completed",
+        "description": "Played when the current task is marked complete in the panel.",
+        "options": ["block-chime-clean", "task-two-note"],
+        "defaultValue": "task-two-note"
+      },
+      {
+        "key": "soundSameForBoth",
+        "type": "boolean",
+        "label": "Same sound for both events",
+        "description": "Play the block-end sound when a task is completed too.",
+        "defaultValue": false
+      },
+      {
+        "key": "soundRepeat",
+        "type": "integer",
+        "label": "Times each alarm plays",
+        "description": "How many times one alarm is heard, with a short gap between plays.",
+        "min": 1,
+        "max": 3,
+        "step": 1,
+        "defaultValue": 2
+      },
+      {
+        "key": "soundVolume",
+        "type": "integer",
+        "label": "Alarm volume",
+        "description": "Volume of the alarm, 0 to 100. Does not change the system volume.",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "defaultValue": 55
       }
     ]
   }

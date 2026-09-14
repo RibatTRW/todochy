@@ -41,6 +41,32 @@ QtObject {
 
   // ------------------------------------------------------------------ block
 
+  // The alarm's six settings, read with the same tolerant fallbacks: the shell
+  // does not write manifest defaults into shell.json, and a value can arrive
+  // there as a string, so Model owns the parsing (Boolean("false") is true).
+  readonly property var soundSettings: Model.normalizeSoundSettings(hostSettings)
+  readonly property bool soundEnabled: soundSettings.soundEnabled
+  readonly property bool soundSameForBoth: soundSettings.soundSameForBoth
+  readonly property string soundBlockEnd: soundSettings.soundBlockEnd
+  readonly property string soundTaskDone: soundSettings.soundTaskDone
+  readonly property int soundRepeat: soundSettings.soundRepeat
+  readonly property int soundVolume: soundSettings.soundVolume
+
+  // The alarm sounds, unchanged in behaviour for everything else. Exactly two
+  // events reach it: the work-completed effect below and `setTaskDone`. How it
+  // plays — in-process first, external player only as a fallback, repeat
+  // spacing, volume — belongs to Alarm.qml and Model.js.
+  readonly property string assetDir: Qt.resolvedUrl("assets/sounds/")
+  property Alarm alarm: Alarm {
+    assetDir: engine.assetDir
+    enabled: engine.soundEnabled
+    sameForBoth: engine.soundSameForBoth
+    blockSound: engine.soundBlockEnd
+    taskSound: engine.soundTaskDone
+    repeat: engine.soundRepeat
+    volumePercent: engine.soundVolume
+  }
+
   // The block value *is* the state; every property below it is a read-only view
   // for the pill and the panel. Only `dispatch` and the task functions write it,
   // and the reducer is the one owner of the rules those writes obey.
@@ -114,7 +140,14 @@ QtObject {
     for (var i = 0; i < effects.length; i++) {
       var effect = effects[i]
       if (effect.kind === "persist") save()
-      else if (effect.kind === "notify") notifyBlockEnd(effect.phase)
+      else if (effect.kind === "notify") {
+        notifyBlockEnd(effect.phase)
+        // Audible only when a *work* block ends: the effect carries the phase
+        // the finished block armed, so a break phase means work just ended
+        // and a work phase means a break ended. Skips and resets never emit
+        // a notify effect, so they stay silent.
+        if (Model.isBreakPhase(effect.phase)) alarm.play("block")
+      }
       // "credit" needs no adapter work: the reducer already applied it to the
       // block's tasks. It rides along as the observable record of the
       // completion chain.
@@ -141,6 +174,8 @@ QtObject {
   function start() { dispatch({ type: "START" }) }
   function pause() { dispatch({ type: "PAUSE" }) }
   function toggleRunning() { dispatch({ type: running ? "PAUSE" : "START" }) }
+  // Skipping never counts and never sounds: the reducer emits no notify
+  // effect for it, so the alarm in performEffects stays silent.
   function skip() { dispatch({ type: "SKIP" }) }
   function resetBlock() { dispatch({ type: "RESET" }) }
 
@@ -174,12 +209,17 @@ QtObject {
 
   function setTaskDone(id, done) {
     var next = []
+    var wasDone = false
     for (var i = 0; i < block.tasks.length; i++) {
       var t = block.tasks[i]
-      if (t.id === id) next.push({ id: t.id, text: t.text, done: done === true, pomos: t.pomos })
-      else next.push(t)
+      if (t.id === id) {
+        wasDone = t.done === true
+        next.push({ id: t.id, text: t.text, done: done === true, pomos: t.pomos })
+      } else next.push(t)
     }
     commit({ tasks: next })
+    // Ring on the moment of completion, not on every write of `done`.
+    if (done === true && !wasDone) alarm.play("task")
   }
 
   function deleteTask(id) {

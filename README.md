@@ -58,6 +58,8 @@ omarchy bar move ribattrw.todochy --section right
 
 A paused timer renders dimmed; a running one is at full strength. Skipping a block never
 counts toward the streak or a task's pomodoro count — only blocks that run to completion do.
+Adding a task makes it current only when there is no current task or the current one is
+already complete; otherwise the cursor stays where it is.
 
 When a work block finishes:
 
@@ -87,8 +89,9 @@ omarchy bar set ribattrw.todochy longBreakEvery 2
 
 Settings are stored on the widget's entry in `~/.config/omarchy/shell.json`. Every value falls
 back to its default when missing, so the plugin works with an empty entry. A change takes
-effect from the next block — a block already running or paused keeps the length it started
-with.
+effect from the next start — a running block keeps its deadline, and a paused block with
+partial progress keeps its remaining time, while a fresh or idle block adopts the new
+length. This holds whether the change comes from the gear panel or from `omarchy bar set`.
 
 ## State
 

@@ -230,7 +230,7 @@ QtObject {
     var task = Model.normalizeTask({ text: value })
     if (!task) return
     next.tasks = tasks.concat([task])
-    if (currentTaskId === "") next.currentTaskId = task.id
+    next.currentTaskId = Model.currentTaskIdAfterAdd(tasks, currentTaskId, task.id)
     applyState(next)
     save()
   }
@@ -289,7 +289,7 @@ QtObject {
     host.settings = merged
     if (host.bar && host.bar.shell && typeof host.bar.shell.updateEntryInline === "function")
       host.bar.shell.updateEntryInline(moduleName, merged)
-    if (!running) {
+    if (!running && !(pausedMs > 0)) {
       pausedMs = Model.phaseLengthMs(effectiveSettings, phase)
       nowMs = Date.now()
     }

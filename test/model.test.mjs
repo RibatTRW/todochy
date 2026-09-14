@@ -234,3 +234,20 @@ test("history stays bounded for a very old state file", () => {
   // The newest day survives the trim.
   assert.equal(state.history["2026-09-14"], 1)
 })
+
+test("adding a task takes the cursor only when the current task is done", () => {
+  const open = [{ id: "a", text: "current", done: false, pomos: 0 }]
+  assert.equal(Model.currentTaskIdAfterAdd(open, "a", "b"), "a")
+  assert.equal(Model.currentTaskIdAfterAdd([], "", "b"), "b")
+  assert.equal(Model.currentTaskIdAfterAdd([{ id: "a", text: "done", done: true, pomos: 0 }], "a", "b"), "b")
+})
+
+test("a task added after its predecessor is done receives the next completed block", () => {
+  const done = { id: "a", text: "finished", done: true, pomos: 1 }
+  const fresh = { id: "b", text: "next", done: false, pomos: 0 }
+  const current = Model.currentTaskIdAfterAdd([done], "a", "b")
+  assert.equal(current, "b")
+  const credited = Model.creditCurrentTask([done, fresh], current)
+  assert.equal(credited[0].pomos, 1)
+  assert.equal(credited[1].pomos, 1)
+})

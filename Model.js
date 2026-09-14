@@ -192,6 +192,16 @@ function creditCurrentTask(tasks, currentTaskId) {
   return out
 }
 
+function currentTaskIdAfterAdd(tasks, currentTaskId, newTaskId) {
+  if (!newTaskId) return currentTaskId || ""
+  if (!currentTaskId) return newTaskId
+  var list = Array.isArray(tasks) ? tasks : []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].id === currentTaskId) return list[i].done === true ? newTaskId : currentTaskId
+  }
+  return newTaskId
+}
+
 // The next incomplete task in list order, or "" when none is left.
 function nextIncompleteTaskId(tasks, excludeId) {
   for (var i = 0; i < tasks.length; i++) {
@@ -393,6 +403,7 @@ if (typeof module !== "undefined" && module.exports) {
     normalizeTask: normalizeTask,
     hasTask: hasTask,
     creditCurrentTask: creditCurrentTask,
+    currentTaskIdAfterAdd: currentTaskIdAfterAdd,
     nextIncompleteTaskId: nextIncompleteTaskId,
     emptyState: emptyState,
     parseState: parseState,

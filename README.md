@@ -1,2 +1,149 @@
 # todochy
-Minimal task tracker with a Pomodoro timer for the Omarchy bar
+
+A minimal task tracker with a Pomodoro timer for the [Omarchy](https://omarchy.org) bar.
+
+The bar pill shows the countdown and a phase glyph — nothing else. Clicking it opens a
+text-first panel with the timer, a flat task list, and a day-based streak. Every colour comes
+from the active Omarchy theme, so the widget follows the user's theme with no configuration.
+
+```
+ 󰔛 18:42      ← the pill: phase glyph + countdown, sitting beside omarchy.weather
+```
+
+## Features
+
+- **Three phases** — work, short break, long break — with the classic 25 / 5 / 15 minute
+  defaults and a long break every 4 work blocks. All four numbers are editable.
+- **Tasks** — a flat list with one "current" task bound to the running work block. No
+  projects, due dates or priorities.
+- **Streak** — a day counts when at least one work block is *completed*. Missed a day and
+  the streak restarts: there is no pause or freeze.
+- **Persistence** — tasks, the day's completions and the streak survive shell restarts,
+  written to `~/.local/state/omarchy/todochy/state.json`.
+- **Notifications** — one toast per block end, replaced in place rather than stacked, with a
+  click action that opens the panel.
+
+## Requirements
+
+Omarchy with the Quattro shell (`omarchy-shell`). The plugin uses only the shell's own
+`qs.Ui` / `qs.Commons` components, `omarchy-notification-send`, and `mkdir`.
+
+## Install
+
+```sh
+omarchy plugin add https://github.com/RibatTRW/todochy.git --enable --yes
+```
+
+`barWidget.defaultSection` is `center`, and a centre widget with no explicit placement lands
+directly after `omarchy.weather`, so the pill appears beside the weather pill with no manual
+placement. To put it somewhere else:
+
+```sh
+omarchy bar move ribattrw.todochy --section center --after omarchy.weather
+omarchy bar move ribattrw.todochy --section right
+```
+
+## Usage
+
+| Where | Action | What happens |
+|---|---|---|
+| Pill | left click | open or close the panel |
+| Pill | right click | start / pause the current block |
+| Pill | middle click | skip the current block |
+| Panel | click a task | make it current, or mark the current task complete |
+| Panel | `add task` field | type and press Enter |
+| Panel | gear button | show or hide the interval settings |
+| Panel | start / skip / reset | control the block |
+| Panel | Escape | close the panel |
+
+A paused timer renders dimmed; a running one is at full strength. Skipping a block never
+counts toward the streak or a task's pomodoro count — only blocks that run to completion do.
+Adding a task makes it current only when there is no current task or the current one is
+already complete; otherwise the cursor stays where it is.
+
+When a work block finishes:
+
+- the completed block is credited to the current task and to today's count,
+- the streak advances (or restarts, if yesterday was missed),
+- the next task becomes current **only if the current one had been marked complete** during
+  the block,
+- the next phase begins — and waits for you to press start. Blocks never auto-start.
+
+## Configuration
+
+Open the panel and click the gear, or set values directly:
+
+```sh
+omarchy bar set ribattrw.todochy workMinutes 50
+omarchy bar set ribattrw.todochy shortBreakMinutes 10
+omarchy bar set ribattrw.todochy longBreakMinutes 20
+omarchy bar set ribattrw.todochy longBreakEvery 2
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `workMinutes` | `25` | length of a work block, in minutes |
+| `shortBreakMinutes` | `5` | length of a short break |
+| `longBreakMinutes` | `15` | length of a long break |
+| `longBreakEvery` | `4` | work blocks completed before a long break |
+
+Settings are stored on the widget's entry in `~/.config/omarchy/shell.json`. Every value falls
+back to its default when missing, so the plugin works with an empty entry. A change takes
+effect from the next start — a running block keeps its deadline, and a paused block with
+partial progress keeps its remaining time, while a fresh or idle block adopts the new
+length. This holds whether the change comes from the gear panel or from `omarchy bar set`.
+
+## State
+
+`${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/todochy/state.json` holds the task list, the
+per-day completion history, and the streak counters. It is written atomically and is only ever
+read by this plugin; deleting it starts from a clean slate.
+
+The saved countdown is a wall-clock deadline, so suspending the machine or restarting the
+shell does not skew a running block. A block that expired while the shell was down completes
+on the next start if it expired within the last six hours; anything older is treated as
+abandoned rather than credited to the streak.
+
+## Notes
+
+- **No sound.** Block ends are announced with a desktop notification only. Omarchy's shell
+  exposes no verified sound surface, so todochy does not play one and does not ship audio.
+- **No sync, accounts, projects, due dates or priorities.** That is the point.
+- The plugin is a single `bar-widget`; the panel is `Panel.qml` loaded by `BarWidget.qml`, not
+  a second plugin kind.
+
+## Development
+
+```sh
+omarchy plugin clone omarchy.clock --edit     # or work in a checkout of this repo
+omarchy plugin validate .
+node --test test/                             # the state and cadence rules
+```
+
+`Model.js` holds every rule with a consequence (phase cadence, streak accounting, day
+rollover, state parsing) as plain JavaScript, which is what `test/model.test.mjs` exercises.
+`Engine.qml` owns the timer, file IO and notifications; `Panel.qml` owns the UI.
+
+To lint against the installed shell, an import root shaped like the `qs.*` module names is
+needed, because the shell's module directories are `shell/Commons` and `shell/Ui` while the
+imports are `qs.Commons` and `qs.Ui`:
+
+```sh
+mkdir -p .lint-import/qs
+ln -sfn "$OMARCHY_PATH/shell/Commons" .lint-import/qs/Commons
+ln -sfn "$OMARCHY_PATH/shell/Ui"      .lint-import/qs/Ui
+qmllint -I "$OMARCHY_PATH/shell" -I "$PWD/.lint-import" BarWidget.qml Engine.qml Panel.qml
+```
+
+Do not commit `.lint-import` — the plugin validator rejects symlinks inside a plugin folder.
+
+## Remove
+
+```sh
+omarchy plugin remove ribattrw.todochy
+rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/todochy"
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).

@@ -1,0 +1,10 @@
+# The checks this repository genuinely runs. `no-mistakes ci-workflow` mirrors
+# `commands.lint` and `commands.test` into .github/workflows/ci.yml so a pull
+# request registers real GitHub checks instead of reporting none.
+commands:
+  test: "node --test test/*.test.mjs"
+  # qmllint lives in Qt6's declarative dev tools and is not always on PATH, so
+  # locate it. Off an Omarchy machine the qs.Ui / qs.Commons imports cannot be
+  # resolved and qmllint reports those as import warnings; it still fails on a
+  # real syntax or structure error, which is what this check is for.
+  lint: 'QMLLINT="$(command -v qmllint || command -v qmllint6 || echo /usr/lib/qt6/bin/qmllint)"; "$QMLLINT" BarWidget.qml Engine.qml Panel.qml'

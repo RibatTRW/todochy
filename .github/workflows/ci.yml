@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: ['main']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # `no-mistakes ci-workflow` emits a Go toolchain step by default; this
+      # repository is QML plus Node, so the runner needs Node above and Qt's
+      # QML tools here. qmllint ships in qt6-declarative-dev-tools.
+      - name: Install QML tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-declarative-dev-tools
+
+      - name: Lint
+        run: |
+          QMLLINT="$(command -v qmllint || command -v qmllint6 || echo /usr/lib/qt6/bin/qmllint)"; "$QMLLINT" BarWidget.qml Engine.qml Panel.qml
+
+      - name: Test
+        run: |
+          node --test test/*.test.mjs

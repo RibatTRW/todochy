@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "ribattrw.todochy",
+  "name": "Todochy",
+  "version": "1.0.0",
+  "author": "RibatTRW",
+  "license": "MIT",
+  "description": "Minimal Pomodoro timer with a task list and a daily streak for the Omarchy bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Todochy",
+    "description": "Pomodoro timer with a flat task list and a day-based streak",
+    "category": "Productivity",
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {
+      "workMinutes": 25,
+      "shortBreakMinutes": 5,
+      "longBreakMinutes": 15,
+      "longBreakEvery": 4
+    },
+    "schema": [
+      {
+        "key": "workMinutes",
+        "type": "integer",
+        "label": "Work minutes",
+        "description": "Length of one work block.",
+        "min": 1,
+        "max": 600,
+        "step": 1,
+        "defaultValue": 25
+      },
+      {
+        "key": "shortBreakMinutes",
+        "type": "integer",
+        "label": "Short break minutes",
+        "description": "Length of a break after a normal work block.",
+        "min": 1,
+        "max": 600,
+        "step": 1,
+        "defaultValue": 5
+      },
+      {
+        "key": "longBreakMinutes",
+        "type": "integer",
+        "label": "Long break minutes",
+        "description": "Length of the break that follows a full set of work blocks.",
+        "min": 1,
+        "max": 600,
+        "step": 1,
+        "defaultValue": 15
+      },
+      {
+        "key": "longBreakEvery",
+        "type": "integer",
+        "label": "Work blocks per long break",
+        "description": "How many work blocks are completed before a long break.",
+        "min": 1,
+        "max": 24,
+        "step": 1,
+        "defaultValue": 4
+      }
+    ]
+  }
+}

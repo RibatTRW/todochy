@@ -1,14 +1,17 @@
-// Pure state and cadence logic for todochy.
+// Pure helpers for todochy: the rules that are not the block lifecycle.
 //
 // Everything here is plain JavaScript with no QML dependency so it can be
-// exercised by the node test suite in test/model.test.mjs. The QML side
-// (Engine.qml) owns timers, file IO and notifications and delegates every
-// decision that has rules attached — phase cadence, streak accounting, day
-// rollover, state parsing — to this file.
+// exercised by the node test suite in test/model.test.mjs. This file is the
+// library of primitives — settings clamping, phase lengths, formatting,
+// calendar days, streak arithmetic and the task rules. The *lifecycle* that
+// composes them (arming a countdown, a settings change arriving mid-block, the
+// catch-up window, the completion consequence chain and the shape of the state
+// file) lives in Block.js, which is the single owner of every one of those
+// rules.
 //
 // Vocabulary
 //   phase        "work" | "short" | "long"
-//   cycleBlocks  work blocks completed in the current long-break cycle
+//   cadence      which phase follows a work block (Block.js)
 //   todayBlocks  work blocks completed today (local calendar day)
 //   history      { "YYYY-MM-DD": <work blocks completed that day> }
 //   streak       consecutive local days each with >= 1 completed work block
@@ -30,8 +33,6 @@ var GLYPHS = {
   streak: "\u{25B2}"   // ▲
 }
 
-var STATE_VERSION = 1
-var MAX_HISTORY_DAYS = 400
 var MS_PER_MINUTE = 60 * 1000
 
 // ---------------------------------------------------------------- primitives
@@ -83,10 +84,6 @@ function phaseLabel(phase) {
   return "Focus"
 }
 
-function longBreakEvery(settings) {
-  return clampInt(settings && settings.longBreakEvery, 1, 24, DEFAULT_SETTINGS.longBreakEvery)
-}
-
 function phaseMinutes(settings, phase) {
   var s = settings || DEFAULT_SETTINGS
   var p = normalizePhase(phase)
@@ -97,22 +94,6 @@ function phaseMinutes(settings, phase) {
 
 function phaseLengthMs(settings, phase) {
   return phaseMinutes(settings, phase) * MS_PER_MINUTE
-}
-
-// Which break follows a completed work block. `cycleBlocks` is the count
-// *after* the block that just completed, so 4 blocks with every=4 yields the
-// long break.
-function nextPhaseAfterWork(cycleBlocks, every) {
-  var e = clampInt(every, 1, 24, DEFAULT_SETTINGS.longBreakEvery)
-  var blocks = Math.max(0, Math.floor(finiteOr(cycleBlocks, 0)))
-  return (blocks > 0 && blocks % e === 0) ? "long" : "short"
-}
-
-// 1-based position of the running work block inside the current cycle.
-function cyclePosition(cycleBlocks, every) {
-  var e = clampInt(every, 1, 24, DEFAULT_SETTINGS.longBreakEvery)
-  var blocks = Math.max(0, Math.floor(finiteOr(cycleBlocks, 0)))
-  return (blocks % e) + 1
 }
 
 function progressFraction(remainingMs, totalMs) {
@@ -212,134 +193,7 @@ function nextIncompleteTaskId(tasks, excludeId) {
   return ""
 }
 
-// ---------------------------------------------------------------- state
-
-function emptyState() {
-  return {
-    version: STATE_VERSION,
-    tasks: [],
-    currentTaskId: "",
-    phase: "work",
-    running: false,
-    deadlineMs: 0,
-    pausedMs: 0,
-    cycleBlocks: 0,
-    todayBlocks: 0,
-    todayKey: "",
-    history: {},
-    currentStreak: 0,
-    bestStreak: 0,
-    lastCountedDay: "",
-    notifyId: 0
-  }
-}
-
-function sanitizeHistory(value) {
-  var out = {}
-  if (!isPlainObject(value)) return out
-  var keys = Object.keys(value)
-  for (var i = 0; i < keys.length; i++) {
-    var key = keys[i]
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue
-    var count = Math.max(0, Math.floor(finiteOr(value[key], 0)))
-    if (count > 0) out[key] = count
-  }
-  // Keep the file bounded even after years of use.
-  var all = Object.keys(out).sort()
-  if (all.length > MAX_HISTORY_DAYS) {
-    var kept = {}
-    var start = all.length - MAX_HISTORY_DAYS
-    for (var j = start; j < all.length; j++) kept[all[j]] = out[all[j]]
-    return kept
-  }
-  return out
-}
-
-function parseState(raw) {
-  var state = emptyState()
-  var parsed = null
-  try { parsed = JSON.parse(String(raw || "")) } catch (e) { parsed = null }
-  if (!isPlainObject(parsed)) return state
-
-  if (Array.isArray(parsed.tasks)) {
-    for (var i = 0; i < parsed.tasks.length; i++) {
-      var task = normalizeTask(parsed.tasks[i])
-      if (task) state.tasks.push(task)
-    }
-  }
-  state.currentTaskId = (typeof parsed.currentTaskId === "string") ? parsed.currentTaskId : ""
-  if (state.currentTaskId !== "" && !hasTask(state.tasks, state.currentTaskId)) state.currentTaskId = ""
-  state.phase = normalizePhase(parsed.phase)
-  state.running = parsed.running === true
-  state.deadlineMs = Math.max(0, finiteOr(parsed.deadlineMs, 0))
-  state.pausedMs = Math.max(0, finiteOr(parsed.pausedMs, 0))
-  state.cycleBlocks = Math.max(0, Math.floor(finiteOr(parsed.cycleBlocks, 0)))
-  state.todayBlocks = Math.max(0, Math.floor(finiteOr(parsed.todayBlocks, 0)))
-  state.todayKey = (typeof parsed.todayKey === "string") ? parsed.todayKey : ""
-  state.history = sanitizeHistory(parsed.history)
-  state.currentStreak = Math.max(0, Math.floor(finiteOr(parsed.currentStreak, 0)))
-  state.bestStreak = Math.max(0, Math.floor(finiteOr(parsed.bestStreak, 0)))
-  state.lastCountedDay = (typeof parsed.lastCountedDay === "string") ? parsed.lastCountedDay : ""
-  state.notifyId = Math.max(0, Math.floor(finiteOr(parsed.notifyId, 0)))
-  if (state.bestStreak < state.currentStreak) state.bestStreak = state.currentStreak
-  return state
-}
-
-function serializeState(state) {
-  var s = state || emptyState()
-  var payload = {
-    version: STATE_VERSION,
-    tasks: Array.isArray(s.tasks) ? s.tasks : [],
-    currentTaskId: s.currentTaskId || "",
-    phase: normalizePhase(s.phase),
-    running: s.running === true,
-    deadlineMs: Math.max(0, finiteOr(s.deadlineMs, 0)),
-    pausedMs: Math.max(0, finiteOr(s.pausedMs, 0)),
-    cycleBlocks: Math.max(0, Math.floor(finiteOr(s.cycleBlocks, 0))),
-    todayBlocks: Math.max(0, Math.floor(finiteOr(s.todayBlocks, 0))),
-    todayKey: typeof s.todayKey === "string" ? s.todayKey : "",
-    history: sanitizeHistory(s.history),
-    currentStreak: Math.max(0, Math.floor(finiteOr(s.currentStreak, 0))),
-    bestStreak: Math.max(0, Math.floor(finiteOr(s.bestStreak, 0))),
-    lastCountedDay: typeof s.lastCountedDay === "string" ? s.lastCountedDay : "",
-    notifyId: Math.max(0, Math.floor(finiteOr(s.notifyId, 0)))
-  }
-  return JSON.stringify(payload, null, 2) + "\n"
-}
-
-// Move today's counter onto the current local day. History is untouched:
-// yesterday's count stays in the record.
-function rollDay(state, epochMs) {
-  var today = dayKey(epochMs)
-  if (state.todayKey === today) return state
-  var out = Object.assign({}, state)
-  out.todayKey = today
-  out.todayBlocks = 0
-  return out
-}
-
-// One naturally completed work block: bumps today's count, writes history,
-// and continues or restarts the streak. Hard reset is deliberate — the
-// captain ruled out pause/freeze affordances, so a missed day restarts at 1.
-function applyWorkBlockCompleted(state, epochMs) {
-  var out = rollDay(state, epochMs)
-  out = Object.assign({}, out)
-  out.todayBlocks = out.todayBlocks + 1
-  var history = Object.assign({}, out.history)
-  history[out.todayKey] = out.todayBlocks
-  out.history = history
-
-  if (out.lastCountedDay === out.todayKey) {
-    // Already counted today; keep the streak as it stands.
-  } else if (out.lastCountedDay !== "" && out.lastCountedDay === previousDayKey(out.todayKey)) {
-    out.currentStreak = out.currentStreak + 1
-  } else {
-    out.currentStreak = 1
-  }
-  out.lastCountedDay = out.todayKey
-  if (out.currentStreak > out.bestStreak) out.bestStreak = out.currentStreak
-  return out
-}
+// ------------------------------------------------------- the streak's display
 
 // What the user should see. A streak stays alive through today when the last
 // counted day was yesterday; anything older means the chain is broken.
@@ -365,15 +219,6 @@ function recentDays(state, epochMs, count) {
 
 // ---------------------------------------------------------------- settings
 
-function pausedMsAfterSettingsChange(remaining, oldPhaseLength, newPhaseLength) {
-  var r = Number(remaining)
-  if (!isFinite(r) || r <= 0) return newPhaseLength
-  var old = Number(oldPhaseLength)
-  if (!isFinite(old) || old <= 0) return newPhaseLength
-  if (r >= old) return newPhaseLength
-  return r
-}
-
 function normalizeSettings(values) {
   var v = isPlainObject(values) ? values : {}
   return {
@@ -388,40 +233,29 @@ function normalizeSettings(values) {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    DEFAULT_SETTINGS: DEFAULT_SETTINGS,
+    // Rendering primitives. Panel.qml and Engine.qml read these; nothing in
+    // them has a rule attached to the lifecycle.
     GLYPHS: GLYPHS,
-    STATE_VERSION: STATE_VERSION,
-    isPlainObject: isPlainObject,
-    pad2: pad2,
-    clampInt: clampInt,
-    normalizePhase: normalizePhase,
     isBreakPhase: isBreakPhase,
     phaseGlyph: phaseGlyph,
     phaseLabel: phaseLabel,
-    phaseMinutes: phaseMinutes,
-    phaseLengthMs: phaseLengthMs,
-    longBreakEvery: longBreakEvery,
-    nextPhaseAfterWork: nextPhaseAfterWork,
-    cyclePosition: cyclePosition,
     progressFraction: progressFraction,
     formatMs: formatMs,
+    // Settings and phase lengths. Block.js arms from these and Engine.qml
+    // derives its displayed total from them.
+    normalizeSettings: normalizeSettings,
+    phaseLengthMs: phaseLengthMs,
+    // Calendar days and the streak's display rule.
     dayKey: dayKey,
-    shiftDayKey: shiftDayKey,
     previousDayKey: previousDayKey,
-    newTaskId: newTaskId,
+    recentDays: recentDays,
+    displayStreak: displayStreak,
+    // Task rules. Task CRUD in Engine.qml and the completion chain in Block.js
+    // both call these.
     normalizeTask: normalizeTask,
     hasTask: hasTask,
     creditCurrentTask: creditCurrentTask,
     currentTaskIdAfterAdd: currentTaskIdAfterAdd,
-    nextIncompleteTaskId: nextIncompleteTaskId,
-    emptyState: emptyState,
-    parseState: parseState,
-    serializeState: serializeState,
-    rollDay: rollDay,
-    applyWorkBlockCompleted: applyWorkBlockCompleted,
-    displayStreak: displayStreak,
-    recentDays: recentDays,
-    pausedMsAfterSettingsChange: pausedMsAfterSettingsChange,
-    normalizeSettings: normalizeSettings
+    nextIncompleteTaskId: nextIncompleteTaskId
   }
 }

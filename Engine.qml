@@ -2,16 +2,21 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import "Model.js" as Model
+import "Block.js" as Block
 
-// Todochy's engine: the timer, the task list, the streak, and the state file.
+// Todochy's engine: the adapter around the block lifecycle.
+//
+// Block.js owns what a block does — arming a phase length, the three phases, a
+// settings change arriving mid-block, the six-hour catch-up window, and the
+// whole consequence chain of a finished work block. This file owns the shell's
+// side of that: the ticker that hands the reducer a clock reading, the FileView
+// that reads and writes state.json, the notification process, the widget's
+// settings entry, and the projection of the block value onto the properties
+// Panel.qml and BarWidget.qml bind to.
 //
 // It lives on the bar widget rather than inside Panel.qml because the countdown
 // has to keep running while the panel is closed, and because the bar surface
 // exists per monitor — one engine drives every surface of this widget.
-//
-// Every rule with a consequence (phase cadence, streak accounting, day
-// rollover, state parsing) is delegated to Model.js, which is unit-tested in
-// test/model.test.mjs. This file owns only timers, file IO and notifications.
 //
 // The countdown is derived from a wall-clock deadline rather than accumulated
 // ticks, so suspending the machine or restarting the shell cannot skew it.
@@ -34,61 +39,27 @@ QtObject {
   readonly property int longBreakMinutes: effectiveSettings.longBreakMinutes
   readonly property int longBreakEvery: effectiveSettings.longBreakEvery
 
-  // Phase length the current countdown was armed from. Settings also change
-  // from outside this panel — `omarchy bar set`, or shell.json edited by hand —
-  // which updates `effectiveSettings` without ever calling setSetting. An idle
-  // block still at its full length adopts the new length, a paused one keeps
-  // its remaining time, and a running one keeps the deadline it started with.
-  property double lastPhaseLengthMs: 0
+  // ------------------------------------------------------------------ block
 
-  onEffectiveSettingsChanged: engine.phaseLengthChanged()
+  // The block value *is* the state; every property below it is a read-only view
+  // for the pill and the panel. Only `dispatch` and the task functions write it,
+  // and the reducer is the one owner of the rules those writes obey.
+  property var block: Block.empty()
 
-  function phaseLengthChanged() {
-    var next = Model.phaseLengthMs(effectiveSettings, phase)
-    if (next === lastPhaseLengthMs) return
-    if (!ready) {
-      lastPhaseLengthMs = next
-      return
-    }
-    if (!running) {
-      pausedMs = Model.pausedMsAfterSettingsChange(pausedMs, lastPhaseLengthMs, next)
-      nowMs = Date.now()
-      save()
-    }
-    lastPhaseLengthMs = next
-  }
+  readonly property var tasks: block.tasks
+  readonly property string currentTaskId: block.currentTaskId
+  readonly property string phase: block.phase
+  readonly property bool running: block.running === true
+  readonly property int todayBlocks: block.todayBlocks
+  readonly property int cycleBlocks: block.cycleBlocks
+  readonly property int notifyId: block.notifyId
+  readonly property bool hasCurrentTask: currentTaskId !== ""
 
-  // ------------------------------------------------------------------ state
-
-  property var tasks: []
-  property string currentTaskId: ""
-  property string phase: "work"
-  property bool running: false
-  property double deadlineMs: 0
-  property double pausedMs: 0
-  property int cycleBlocks: 0
-  property int todayBlocks: 0
-  property string todayKey: ""
-  property var history: ({})
-  property int currentStreak: 0
-  property int bestStreak: 0
-  property string lastCountedDay: ""
-  property int notifyId: 0
-
-  // Wall clock, refreshed by the ticker. Bindings read this rather than
+  // Wall clock, refreshed on every dispatch. Bindings read this rather than
   // calling Date.now() so a paused engine does not re-evaluate on every frame.
   property double nowMs: Date.now()
 
-  property bool ready: false
-  property bool dirReady: false
-
-  // A run that expired while the shell was down still completes, but only if it
-  // expired recently: waking up a week later must not credit a week-old block.
-  readonly property double maxCatchUpMs: 6 * 60 * 60 * 1000
-
-  // --------------------------------------------------------------- derived
-
-  readonly property double remainingMs: running ? Math.max(0, deadlineMs - nowMs) : Math.max(0, pausedMs)
+  readonly property double remainingMs: Block.remainingMs(block, nowMs)
   readonly property double phaseTotalMs: Model.phaseLengthMs(effectiveSettings, phase)
   readonly property real progress: Model.progressFraction(remainingMs, phaseTotalMs)
   readonly property bool runningOut: running && remainingMs > 0 && remainingMs <= 60 * 1000
@@ -96,208 +67,122 @@ QtObject {
   readonly property string phaseGlyph: Model.phaseGlyph(phase)
   readonly property string phaseLabel: Model.phaseLabel(phase)
   readonly property bool onBreak: Model.isBreakPhase(phase)
-  readonly property int cyclePos: Model.cyclePosition(cycleBlocks, longBreakEvery)
-  readonly property int streak: Model.displayStreak(snapshot(), nowMs)
-  readonly property bool hasCurrentTask: currentTaskId !== ""
+  readonly property int cyclePos: Block.cyclePosition(cycleBlocks, longBreakEvery)
+  readonly property int streak: Model.displayStreak(block, nowMs)
 
-  function snapshot() {
-    return {
-      version: Model.STATE_VERSION,
-      tasks: tasks,
-      currentTaskId: currentTaskId,
-      phase: phase,
-      running: running,
-      deadlineMs: deadlineMs,
-      pausedMs: pausedMs,
-      cycleBlocks: cycleBlocks,
-      todayBlocks: todayBlocks,
-      todayKey: todayKey,
-      history: history,
-      currentStreak: currentStreak,
-      bestStreak: bestStreak,
-      lastCountedDay: lastCountedDay,
-      notifyId: notifyId
-    }
-  }
-
-  function applyState(state) {
-    tasks = state.tasks
-    currentTaskId = state.currentTaskId
-    phase = state.phase
-    running = state.running
-    deadlineMs = state.deadlineMs
-    pausedMs = state.pausedMs
-    cycleBlocks = state.cycleBlocks
-    todayBlocks = state.todayBlocks
-    todayKey = state.todayKey
-    history = state.history
-    currentStreak = state.currentStreak
-    bestStreak = state.bestStreak
-    lastCountedDay = state.lastCountedDay
-    notifyId = state.notifyId
-  }
+  // The state file is only read once the widget has been told to arm itself;
+  // before that a settings change has nothing to re-arm.
+  property bool ready: false
+  property bool dirReady: false
 
   // Recent days for the panel strip. Deliberately does not read `nowMs`, so the
   // strip's binding does not churn four times a second.
   function recentDaysList(count) {
-    return Model.recentDays(snapshot(), Date.now(), count)
+    return Model.recentDays(block, Date.now(), count)
   }
+
+  // ------------------------------------------------------------------- seam
+
+  // The single entry point to the lifecycle: hand the block an event and a
+  // reading of the clock, take the next block, perform the effects it asked
+  // for.
+  function dispatch(event) {
+    var now = Date.now()
+    nowMs = now
+    var result = Block.reduce(block, event, { now: now, settings: effectiveSettings })
+    block = result.block
+    performEffects(result.effects)
+    return result
+  }
+
+  function performEffects(effects) {
+    for (var i = 0; i < effects.length; i++) {
+      var effect = effects[i]
+      if (effect.kind === "persist") save()
+      else if (effect.kind === "notify") notifyBlockEnd(effect.phase)
+      // "credit" needs no adapter work: the reducer already applied it to the
+      // block's tasks. It rides along as the observable record of the
+      // completion chain.
+    }
+  }
+
+  // A settings change reaches this widget from two places — the panel's fields
+  // and `omarchy bar set` / an edited shell.json — and both arrive the same
+  // way: this value changes. The reducer is the single owner of what that means
+  // for an idle, a paused and a running block, so the two paths cannot drift
+  // apart.
+  onEffectiveSettingsChanged: if (ready) dispatch({ type: "SETTINGS_CHANGED" })
 
   // ---------------------------------------------------------------- ticker
 
   property Timer ticker: Timer {
+    id: ticker
     interval: 250
     repeat: true
     running: true
-    onTriggered: engine.tick()
+    onTriggered: engine.dispatch({ type: "TICK" })
   }
 
-  function tick() {
-    nowMs = Date.now()
-    if (running && deadlineMs - nowMs <= 0) {
-      completeBlock(true)
-      return
-    }
-    // Roll the day at midnight even when nothing is running, so "today" never
-    // shows yesterday's count.
-    var today = Model.dayKey(nowMs)
-    if (todayKey !== today) {
-      todayKey = today
-      todayBlocks = 0
-      save()
-    }
-  }
-
-  // ----------------------------------------------------------------- phases
-
-  function start() {
-    if (running) return
-    var remaining = remainingMs
-    if (remaining <= 0) remaining = Model.phaseLengthMs(effectiveSettings, phase)
-    pausedMs = remaining
-    deadlineMs = Date.now() + remaining
-    nowMs = Date.now()
-    running = true
-    save()
-  }
-
-  function pause() {
-    if (!running) return
-    pausedMs = Math.max(0, deadlineMs - Date.now())
-    running = false
-    deadlineMs = 0
-    nowMs = Date.now()
-    save()
-  }
-
-  function toggleRunning() {
-    if (running) pause()
-    else start()
-  }
-
-  // Skipping never counts: no work-block credit, no streak movement, no
-  // pomodoro on the task. It only moves the cadence on.
-  function skip() {
-    completeBlock(false)
-  }
-
-  function resetBlock() {
-    running = false
-    deadlineMs = 0
-    pausedMs = Model.phaseLengthMs(effectiveSettings, phase)
-    lastPhaseLengthMs = pausedMs
-    nowMs = Date.now()
-    save()
-  }
-
-  function completeBlock(natural) {
-    var now = Date.now()
-    var wasWork = phase === "work"
-
-    if (wasWork) {
-      if (natural) {
-        var next = Model.applyWorkBlockCompleted(snapshot(), now)
-        next.cycleBlocks = cycleBlocks + 1
-        next.tasks = Model.creditCurrentTask(tasks, currentTaskId)
-        applyState(next)
-        advanceCurrentTask()
-      }
-      phase = Model.nextPhaseAfterWork(cycleBlocks, longBreakEvery)
-    } else {
-      phase = "work"
-    }
-
-    running = false
-    deadlineMs = 0
-    pausedMs = Model.phaseLengthMs(effectiveSettings, phase)
-    lastPhaseLengthMs = pausedMs
-    nowMs = now
-    if (natural) notifyBlockEnd()
-    save()
-  }
-
-  // The captain's rule: a finished block moves the cursor only when the task it
-  // was working on had been marked complete during the block. Otherwise the
-  // task stays current.
-  function advanceCurrentTask() {
-    var current = null
-    for (var i = 0; i < tasks.length; i++) if (tasks[i].id === currentTaskId) current = tasks[i]
-    if (!current || !current.done) return
-    var nextId = Model.nextIncompleteTaskId(tasks, "")
-    if (nextId !== "") currentTaskId = nextId
-  }
+  function start() { dispatch({ type: "START" }) }
+  function pause() { dispatch({ type: "PAUSE" }) }
+  function toggleRunning() { dispatch({ type: running ? "PAUSE" : "START" }) }
+  function skip() { dispatch({ type: "SKIP" }) }
+  function resetBlock() { dispatch({ type: "RESET" }) }
 
   // ------------------------------------------------------------------ tasks
+
+  // Task CRUD is not the lifecycle: these are thin calls into Model.js's pure
+  // task helpers over the block value, and the reducer owns everything that
+  // happens to a task when a block ends.
+
+  function commit(patch) {
+    block = Object.assign({}, block, patch)
+    save()
+  }
 
   function addTask(text) {
     var value = String(text || "").trim()
     if (value === "") return
-    var next = snapshot()
     var task = Model.normalizeTask({ text: value })
     if (!task) return
-    next.tasks = tasks.concat([task])
-    next.currentTaskId = Model.currentTaskIdAfterAdd(tasks, currentTaskId, task.id)
-    applyState(next)
-    save()
+    commit({
+      tasks: block.tasks.concat([task]),
+      currentTaskId: Model.currentTaskIdAfterAdd(block.tasks, block.currentTaskId, task.id)
+    })
   }
 
   function selectTask(id) {
-    if (id === currentTaskId) return
-    if (!Model.hasTask(tasks, id)) return
-    currentTaskId = id
-    save()
+    if (id === block.currentTaskId) return
+    if (!Model.hasTask(block.tasks, id)) return
+    commit({ currentTaskId: id })
   }
 
   function setTaskDone(id, done) {
     var next = []
-    for (var i = 0; i < tasks.length; i++) {
-      var t = tasks[i]
+    for (var i = 0; i < block.tasks.length; i++) {
+      var t = block.tasks[i]
       if (t.id === id) next.push({ id: t.id, text: t.text, done: done === true, pomos: t.pomos })
       else next.push(t)
     }
-    tasks = next
-    save()
+    commit({ tasks: next })
   }
 
   function deleteTask(id) {
     var next = []
-    for (var i = 0; i < tasks.length; i++) if (tasks[i].id !== id) next.push(tasks[i])
-    tasks = next
-    if (currentTaskId === id) {
-      var replacement = Model.nextIncompleteTaskId(tasks, "")
-      currentTaskId = replacement
-    }
-    save()
+    for (var i = 0; i < block.tasks.length; i++) if (block.tasks[i].id !== id) next.push(block.tasks[i])
+    var patch = { tasks: next }
+    if (block.currentTaskId === id) patch.currentTaskId = Model.nextIncompleteTaskId(next, "")
+    commit(patch)
   }
 
   // One click, three meanings: select an open task, complete the current one,
   // or reopen a completed one.
   function handleTaskClick(id) {
     var task = null
-    for (var i = 0; i < tasks.length; i++) if (tasks[i].id === id) task = tasks[i]
+    for (var i = 0; i < block.tasks.length; i++) if (block.tasks[i].id === id) task = block.tasks[i]
     if (!task) return
     if (task.done) { setTaskDone(id, false); return }
-    if (id === currentTaskId) { setTaskDone(id, true); return }
+    if (id === block.currentTaskId) { setTaskDone(id, true); return }
     selectTask(id)
   }
 
@@ -305,10 +190,11 @@ QtObject {
 
   // Persist one interval override. The value rides on the widget's inline
   // shell.json entry, which is the only settings surface the shell gives a bar
-  // widget; shell.json itself is never written directly.
+  // widget; shell.json itself is never written directly. The re-arm this used
+  // to do inline is gone on purpose — the settings value changing is the one
+  // signal that drives it, exactly as it does for `omarchy bar set`.
   function setSetting(key, value) {
     if (!host) return
-    var oldLength = Model.phaseLengthMs(effectiveSettings, phase)
     var merged = { id: moduleName }
     var current = hostSettings || {}
     for (var k in current) if (k !== "id") merged[k] = current[k]
@@ -316,12 +202,6 @@ QtObject {
     host.settings = merged
     if (host.bar && host.bar.shell && typeof host.bar.shell.updateEntryInline === "function")
       host.bar.shell.updateEntryInline(moduleName, merged)
-    if (!running) {
-      pausedMs = Model.pausedMsAfterSettingsChange(pausedMs, oldLength, Model.phaseLengthMs(effectiveSettings, phase))
-      nowMs = Date.now()
-    }
-    lastPhaseLengthMs = Model.phaseLengthMs(effectiveSettings, phase)
-    save()
   }
 
   // ------------------------------------------------------------------- disk
@@ -355,43 +235,12 @@ QtObject {
 
   function save() {
     if (!dirReady) return
-    stateFile.setText(Model.serializeState(snapshot()))
+    stateFile.setText(Block.serialize(block))
   }
 
   function loadState(raw) {
-    var state = Model.parseState(raw)
-    applyState(state)
-    var now = Date.now()
-    nowMs = now
-
-    var today = Model.dayKey(now)
-    if (todayKey !== today) {
-      todayKey = today
-      todayBlocks = 0
-    }
-
-    if (running && deadlineMs > 0) {
-      if (deadlineMs <= now) {
-        // The block expired while the shell was down. Complete it if that was
-        // recent, otherwise treat the session as abandoned.
-        if (now - deadlineMs <= maxCatchUpMs) {
-          ready = true
-          completeBlock(true)
-          return
-        }
-        running = false
-        deadlineMs = 0
-        pausedMs = Model.phaseLengthMs(effectiveSettings, phase)
-      }
-    } else {
-      running = false
-      deadlineMs = 0
-      if (pausedMs <= 0) pausedMs = Model.phaseLengthMs(effectiveSettings, phase)
-    }
-
-    lastPhaseLengthMs = Model.phaseLengthMs(effectiveSettings, phase)
     ready = true
-    save()
+    dispatch({ type: "LOAD", raw: raw })
   }
 
   // ------------------------------------------------------------------ notify
@@ -405,13 +254,7 @@ QtObject {
       waitForEnd: true
       onStreamFinished: {
         var id = parseInt(String(text || "").trim(), 10)
-        if (isFinite(id) && id > 0) {
-          engine.notifyId = id
-          // Persist immediately: otherwise the id lives only in memory and a
-          // shell restart would send a fresh toast instead of replacing the
-          // previous block's one.
-          engine.save()
-        }
+        if (isFinite(id) && id > 0) engine.dispatch({ type: "NOTIFY_SENT", id: id })
       }
     }
   }
@@ -420,7 +263,7 @@ QtObject {
   // the next block's toast reuses it with -r, so a long session never stacks
   // notifications. The action button summons the panel so the toast is useful
   // without a trip to the bar.
-  function notifyBlockEnd() {
+  function notifyBlockEnd(phase) {
     var title = phase === "work" ? "Break over" : (phase === "long" ? "Long break" : "Short break")
     var body = phase === "work"
       ? "Back to focus."
@@ -434,5 +277,12 @@ QtObject {
     notifyProc.running = true
   }
 
-  Component.onCompleted: mkdirProc.running = true
+  Component.onCompleted: {
+    // Block.js composes Model.js's rules, and QML can only hand it that
+    // namespace at runtime: a `.import` directive inside a JS library is not
+    // valid JavaScript, so Block.js is requirable by node instead and takes the
+    // namespace from here.
+    Block.bindModel(Model)
+    mkdirProc.running = true
+  }
 }

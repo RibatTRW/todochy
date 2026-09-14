@@ -3,6 +3,7 @@
 This file is the project's committed home for project-intrinsic agent knowledge: build, test, release, architecture, and sharp-edge notes that should travel with the code.
 
 - Add durable project-specific notes here as they are discovered through real work.
+- Add a new QML file to `.no-mistakes.yaml` and `.github/workflows/ci.yml` when you add one.
 
 ## Project notes
 
@@ -29,6 +30,17 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - **QML can only reach a second JS library through a `.import` directive**, which is invalid
   JavaScript, so `Block.js` stays `require`-able by node and takes the `Model` namespace from
   `Engine.qml` at runtime (`Block.bindModel(Model)`).
+- `Model.js` holds the pure helpers `Block.js` composes plus the alarm's sound choice, volume, repeat spacing and fallback command, and is what `test/model.test.mjs` covers. `Engine.qml` is the adapter that rings `Alarm.qml` on the work-completed effect and on a task marked complete, `Panel.qml` owns the UI, and `SoundPlayer.qml` is the only file importing QtMultimedia (loaded behind a Loader, so a machine without `qt6-multimedia` cannot break the widget).
+- The alarm's volume maps linearly: `soundVolume / 100` is the player's volume, so the bundled files' peaks (−1.5 dBFS chime, −2.2 dBFS two-note) show up as `peak + 20·log10(v)` on the sink monitor. That is how a captured recording verifies the setting.
+
+## Testing against the running shell
+
+- The live Omarchy shell keeps serving the plugin QML it loaded first: editing files under `~/.config/omarchy/plugins/<id>/` (or re-running `omarchy plugin add` for the same id) leaves the running widget on the old component, and `omarchy-shell shell rescanPlugins` does not change that. To exercise edited code live, install it under a fresh plugin id (manifest `id`, `BarWidget.qml` / `Panel.qml` `moduleName`), check it, then `omarchy plugin remove` it. Do not reach for a shell restart.
+- All todochy instances share one state file, `~/.local/state/omarchy/todochy/state.json`, and each engine reads it only at load. Two instances running at once therefore race for it (whichever loads last completes a seeded block), so live tests must not run in parallel across worktrees, and a sound check should be given a distinctive setting (a single play, the other bundled sound) to stay identifiable in the sink monitor.
+- To check the no-`qt6-multimedia` path, mask the module in a private mount namespace instead of touching packages:
+  `unshare -rm --propagation private bash -c 'mount --bind /tmp/empty /usr/lib/qt6/qml/QtMultimedia && quickshell -p <config>.qml'`.
+  The Loader then reports `module "QtMultimedia" is not installed`, the widget keeps running, and the alarm falls back to an external player (or silence when the PATH has none).
+
 
 ## Maintaining this file
 

@@ -117,12 +117,21 @@ abandoned rather than credited to the streak.
 ```sh
 omarchy plugin clone omarchy.clock --edit     # or work in a checkout of this repo
 omarchy plugin validate .
-node --test test/                             # the state and cadence rules
+node --test test/*.test.mjs                   # the lifecycle and the rules
 ```
 
-`Model.js` holds every rule with a consequence (phase cadence, streak accounting, day
-rollover, state parsing) as plain JavaScript, which is what `test/model.test.mjs` exercises.
-`Engine.qml` owns the timer, file IO and notifications; `Panel.qml` owns the UI.
+`Block.js` owns the block lifecycle — arming a phase length, the three phases, a settings
+change arriving mid-block, the six-hour catch-up window, and the whole consequence chain of a
+finished work block — as one pure reducer that returns the next block plus the effects the
+caller must perform. `Model.js` holds the pure helpers it composes (settings clamping, phase
+lengths, formatting, calendar days, streak arithmetic, task rules). `test/block.test.mjs`
+drives the lifecycle with an injected clock, `test/model.test.mjs` the helpers, and
+`test/equivalence.test.mjs` pins the whole seam against a frozen copy of the engine as it
+behaved before that refactor.
+
+`Engine.qml` is the adapter: the ticker, the file IO, the notification process and the
+read-only projection of the block value onto the properties the panel binds to. `Panel.qml`
+owns the UI. `CONTEXT.md` has the vocabulary.
 
 To lint against the installed shell, an import root shaped like the `qs.*` module names is
 needed, because the shell's module directories are `shell/Commons` and `shell/Ui` while the

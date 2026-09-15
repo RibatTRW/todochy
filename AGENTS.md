@@ -32,6 +32,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `Engine.qml` at runtime (`Block.bindModel(Model)`).
 - `Model.js` holds the pure helpers `Block.js` composes plus the alarm's sound choice, volume, repeat spacing and fallback command, and is what `test/model.test.mjs` covers. `Engine.qml` is the adapter that rings `Alarm.qml` on the work-completed effect and on a task marked complete, `Panel.qml` owns the UI, and `SoundPlayer.qml` is the only file importing QtMultimedia (loaded behind a Loader, so a machine without `qt6-multimedia` cannot break the widget).
 - The alarm's in-process volume maps linearly: `soundVolume / 100` is the player's volume, so the bundled files' peaks (−1.5 dBFS chime, −2.2 dBFS two-note) show up as `peak + 20·log10(v)` on the sink monitor. That is how a captured recording verifies the setting.
+- **The marketplace listing is repo-root files, validated at one pinned commit.** `manifest.json`, `README.md`, `LICENSE` and `preview.png` are what `plugins.omarchy.org` reads; `omarchy plugin validate .` mirrors the manifest half of its schema. `ribattrw.todochy` is a permanent marketplace id — renaming it retires the listing — and the README's install/removal commands and its `qt6-multimedia` dependency note are listing requirements, not prose.
 
 ## Testing against the running shell
 
@@ -40,6 +41,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - To check the no-`qt6-multimedia` path, mask the module in a private mount namespace instead of touching packages:
   `unshare -rm --propagation private bash -c 'mount --bind /tmp/empty /usr/lib/qt6/qml/QtMultimedia && quickshell -p <config>.qml'`.
   The Loader then reports `module "QtMultimedia" is not installed`, the widget keeps running, and the alarm falls back to an external player (or silence when the PATH has none).
+- A `preview.png` capture must contain nothing of the captain's. `hyprctl output create headless` adds a wallpaper-only output whose bar renders the widget, so `grim -o HEADLESS-1` photographs the plugin with no other window in reach; remove the output afterwards, because a second monitor runs a second engine against the shared state file. On the captain's own output, pick a crop that no rectangle from `hyprctl clients -j` overlaps and photograph it once with the panel closed as the proof. Seed a demo `state.json` for the screenshot (back it up and restore it byte-exact); the live-shell file is the captain's.
 
 
 ## Maintaining this file

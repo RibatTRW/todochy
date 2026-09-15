@@ -24,13 +24,18 @@ function noon(y, m, d) {
 
 test("the interface stays narrow: every export has a caller", () => {
   // The refactor that introduced Block.js narrowed Model's interface from 35
-  // exports to these 17. Adding one back should be a deliberate decision.
+  // exports to 17. Adding one back is a deliberate decision: the derived-view
+  // work added `displayStreakOnDay`, the day-key form of the streak rule, so
+  // Engine.qml can derive the displayed streak from the day its reducer rolls
+  // instead of reading the clock on every 250 ms tick. `displayStreak` stays
+  // as the clock-based rule the tests and Block.js use.
   assert.deepEqual(Object.keys(Model).sort(), [
     "GLYPHS",
     "creditCurrentTask",
     "currentTaskIdAfterAdd",
     "dayKey",
     "displayStreak",
+    "displayStreakOnDay",
     "formatMs",
     "hasTask",
     "isBreakPhase",

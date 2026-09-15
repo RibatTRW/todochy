@@ -68,7 +68,22 @@ QtObject {
   readonly property string phaseLabel: Model.phaseLabel(phase)
   readonly property bool onBreak: Model.isBreakPhase(phase)
   readonly property int cyclePos: Block.cyclePosition(cycleBlocks, longBreakEvery)
-  readonly property int streak: Model.displayStreak(block, nowMs)
+  // The streak's inputs are the counters and the current day, nothing else.
+  // Deriving it from `nowMs` re-read the clock on every tick (the ticker runs
+  // at 250 ms). The block value is replaced only when it actually changes, so
+  // this binding recomputes only when the counters or the day move — and the
+  // reducer rolls `block.todayKey` at midnight, so the day-rollover edge still
+  // moves the streak without the binding reading the clock. Same shape as
+  // `recentDaysList` below.
+  readonly property int streak: Model.displayStreakOnDay(block.currentStreak, block.lastCountedDay, block.todayKey)
+  // Same treatment for the panel's "n/m done": the count belongs to the module
+  // that owns the task list, so every surface reads it instead of looping the
+  // list itself.
+  readonly property int tasksDone: {
+    var done = 0
+    for (var i = 0; i < tasks.length; i++) if (tasks[i].done) done++
+    return done
+  }
 
   // The state file is only read once the widget has been told to arm itself;
   // before that a settings change has nothing to re-arm.

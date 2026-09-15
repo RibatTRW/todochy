@@ -24,30 +24,48 @@ function noon(y, m, d) {
 
 test("the interface stays narrow: every export has a caller", () => {
   // The refactor that introduced Block.js narrowed Model's interface from 35
-  // exports to 17. Adding one back is a deliberate decision: the derived-view
-  // work added `displayStreakOnDay`, the day-key form of the streak rule, so
-  // Engine.qml can derive the displayed streak from the day its reducer rolls
-  // instead of reading the clock on every 250 ms tick. `displayStreak` stays
-  // as the clock-based rule the tests and Block.js use.
+  // exports to 17. Two features deliberately added to it: the alarm sound rules
+  // (Engine.qml reads the settings, Alarm.qml the playback rules) and the
+  // derived-view work's `displayStreakOnDay`, the day-key form of the streak
+  // rule, so Engine.qml can derive the displayed streak from the day its
+  // reducer rolls instead of reading the clock on every 250 ms tick.
+  // `displayStreak` stays as the clock-based rule the tests and Block.js use.
+  // Adding anything beyond these should be a deliberate decision.
   assert.deepEqual(Object.keys(Model).sort(), [
+    "DEFAULT_SOUND_SETTINGS",
     "GLYPHS",
+    "SOUND_CHOICES",
+    "SOUND_DURATIONS_MS",
+    "SOUND_GAP_MS",
+    "alarmPlays",
+    "alarmRepeatIntervalMs",
+    "alarmTier",
     "creditCurrentTask",
     "currentTaskIdAfterAdd",
     "dayKey",
     "displayStreak",
     "displayStreakOnDay",
+    "fallbackCommand",
+    "fileUrlToPath",
     "formatMs",
     "hasTask",
     "isBreakPhase",
+    "isKnownSoundId",
     "nextIncompleteTaskId",
     "normalizeSettings",
+    "normalizeSoundSettings",
     "normalizeTask",
     "phaseGlyph",
     "phaseLabel",
     "phaseLengthMs",
     "previousDayKey",
     "progressFraction",
-    "recentDays"
+    "recentDays",
+    "soundDurationMs",
+    "soundForEvent",
+    "soundIdOr",
+    "soundVolumeScale",
+    "tolerantBool"
   ])
 })
 
@@ -204,4 +222,122 @@ test("a task added after its predecessor is done receives the next completed blo
   const credited = Model.creditCurrentTask([done, fresh], current)
   assert.equal(credited[0].pomos, 1)
   assert.equal(credited[1].pomos, 1)
+})
+// ---------------------------------------------------------------- sound
+// The alarm: two events, two bundled sounds, a volume, and a repeat. These are
+// the rules behind the captain's picks, so they are tested rather than trusted.
+
+test("sound defaults are the captain's choices: on, two different sounds, twice, 55", () => {
+  assert.deepEqual(Model.normalizeSoundSettings({}), {
+    soundEnabled: true,
+    soundSameForBoth: false,
+    soundBlockEnd: "block-chime-clean",
+    soundTaskDone: "task-two-note",
+    soundRepeat: 2,
+    soundVolume: 55
+  })
+})
+
+test('a boolean written as the string "false" stays false', () => {
+  const s = Model.normalizeSoundSettings({ soundEnabled: "false", soundSameForBoth: "false" })
+  assert.equal(s.soundEnabled, false)
+  assert.equal(s.soundSameForBoth, false)
+  assert.equal(Model.normalizeSoundSettings({ soundEnabled: "true" }).soundEnabled, true)
+  assert.equal(Model.normalizeSoundSettings({ soundEnabled: "off" }).soundEnabled, false)
+  assert.equal(Model.normalizeSoundSettings({ soundEnabled: "on" }).soundEnabled, true)
+  assert.equal(Model.normalizeSoundSettings({ soundEnabled: 0 }).soundEnabled, false)
+  assert.equal(Model.normalizeSoundSettings({ soundEnabled: true }).soundEnabled, true)
+  // Nonsense falls back rather than flipping a setting by accident.
+  assert.equal(Model.normalizeSoundSettings({ soundEnabled: "maybe" }).soundEnabled, true)
+  assert.equal(Model.normalizeSoundSettings({ soundEnabled: null }).soundEnabled, true)
+})
+
+test("a sound the plugin does not ship falls back to the bundled one", () => {
+  const s = Model.normalizeSoundSettings({ soundBlockEnd: "block-deep-gong", soundTaskDone: 7 })
+  assert.equal(s.soundBlockEnd, "block-chime-clean")
+  assert.equal(s.soundTaskDone, "task-two-note")
+  assert.equal(Model.isKnownSoundId("task-two-note"), true)
+  assert.equal(Model.isKnownSoundId("block-deep-gong"), false)
+})
+
+test("repeat and volume are clamped into range", () => {
+  assert.equal(Model.normalizeSoundSettings({ soundRepeat: 0 }).soundRepeat, 1)
+  assert.equal(Model.normalizeSoundSettings({ soundRepeat: 9 }).soundRepeat, 3)
+  assert.equal(Model.normalizeSoundSettings({ soundRepeat: "3" }).soundRepeat, 3)
+  assert.equal(Model.normalizeSoundSettings({ soundRepeat: "twice" }).soundRepeat, 2)
+  assert.equal(Model.normalizeSoundSettings({ soundVolume: -20 }).soundVolume, 0)
+  assert.equal(Model.normalizeSoundSettings({ soundVolume: 500 }).soundVolume, 100)
+  assert.equal(Model.normalizeSoundSettings({ soundVolume: "70" }).soundVolume, 70)
+})
+
+test("each event picks its own sound unless the user asks for one", () => {
+  const separate = { soundBlockEnd: "block-chime-clean", soundTaskDone: "task-two-note" }
+  assert.equal(Model.soundForEvent(separate, "block"), "block-chime-clean")
+  assert.equal(Model.soundForEvent(separate, "task"), "task-two-note")
+  const same = { soundBlockEnd: "task-two-note", soundTaskDone: "block-chime-clean", soundSameForBoth: true }
+  assert.equal(Model.soundForEvent(same, "block"), "task-two-note")
+  assert.equal(Model.soundForEvent(same, "task"), "task-two-note")
+  assert.equal(Model.soundForEvent({}, "block"), "block-chime-clean")
+})
+
+test("the volume setting is a 0-100 number mapped onto the player's 0-1", () => {
+  assert.equal(Model.soundVolumeScale(0), 0)
+  assert.equal(Model.soundVolumeScale(55), 0.55)
+  assert.equal(Model.soundVolumeScale(100), 1)
+  assert.equal(Model.soundVolumeScale(150), 1)
+  assert.equal(Model.soundVolumeScale(-5), 0)
+  assert.equal(Model.soundVolumeScale("70"), 0.7)
+  assert.equal(Model.soundVolumeScale(undefined), 0.55)
+})
+
+test("an alarm plays one to three times and defaults to twice", () => {
+  assert.equal(Model.alarmPlays(2), 2)
+  assert.equal(Model.alarmPlays(1), 1)
+  assert.equal(Model.alarmPlays(3), 3)
+  assert.equal(Model.alarmPlays(0), 1)
+  assert.equal(Model.alarmPlays(99), 3)
+  assert.equal(Model.alarmPlays(undefined), 2)
+})
+
+test("the repeat waits for the whole sound plus the gap, per bundled file", () => {
+  assert.equal(Model.soundDurationMs("block-chime-clean"), 1550)
+  assert.equal(Model.soundDurationMs("task-two-note"), 780)
+  assert.equal(Model.soundDurationMs("not-a-sound"), 0)
+  assert.equal(Model.alarmRepeatIntervalMs(1550, Model.SOUND_GAP_MS), 1900)
+  assert.equal(Model.alarmRepeatIntervalMs(780, Model.SOUND_GAP_MS), 1130)
+  // A missing duration still leaves a gap rather than firing back to back.
+  assert.equal(Model.alarmRepeatIntervalMs(0, 300), 300)
+})
+
+test("playback prefers the in-process player and falls back, then goes quiet", () => {
+  assert.equal(Model.alarmTier(true, "/usr/bin/pw-play"), "in-process")
+  assert.equal(Model.alarmTier(false, "/usr/bin/pw-play"), "external")
+  assert.equal(Model.alarmTier(false, ""), "silent")
+  assert.equal(Model.alarmTier(false, undefined), "silent")
+})
+
+test("the external fallback passes each player the volume flag it understands", () => {
+  const wav = "/tmp/block-chime-clean.wav"
+  assert.deepEqual(Model.fallbackCommand("/usr/bin/mpv", 55, wav),
+    ["/usr/bin/mpv", "--no-video", "--really-quiet", "--volume=55", wav])
+  assert.deepEqual(Model.fallbackCommand("/usr/bin/pw-play", 55, wav),
+    ["/usr/bin/pw-play", "--volume=0.55", wav])
+  assert.deepEqual(Model.fallbackCommand("/usr/bin/paplay", 100, wav),
+    ["/usr/bin/paplay", "--volume=65536", wav])
+  assert.deepEqual(Model.fallbackCommand("/usr/bin/ffplay", 55, wav),
+    ["/usr/bin/ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", wav])
+  assert.deepEqual(Model.fallbackCommand("/usr/bin/canberra-gtk-play", 55, wav),
+    ["/usr/bin/canberra-gtk-play", "-f", wav])
+  assert.deepEqual(Model.fallbackCommand("/usr/bin/aplay", 55, wav), ["/usr/bin/aplay", "-q", wav])
+  // No player, or no file: nothing to run.
+  assert.deepEqual(Model.fallbackCommand("", 55, wav), [])
+  assert.deepEqual(Model.fallbackCommand("/usr/bin/mpv", 55, ""), [])
+})
+
+test("a file:// asset URL becomes a path the external players can open", () => {
+  assert.equal(Model.fileUrlToPath("file:///home/u/.config/omarchy/plugins/x/assets/sounds/a.wav"),
+    "/home/u/.config/omarchy/plugins/x/assets/sounds/a.wav")
+  assert.equal(Model.fileUrlToPath("file:///tmp/my%20sounds/a.wav"), "/tmp/my sounds/a.wav")
+  assert.equal(Model.fileUrlToPath("/already/a/path.wav"), "/already/a/path.wav")
+  assert.equal(Model.fileUrlToPath(""), "")
 })

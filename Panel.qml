@@ -329,80 +329,219 @@ Panel {
         }
 
         // ---------------------------------------- settings (gear only)
-        Column {
+        //
+        // The settings scroll inside a bounded viewport instead of growing the
+        // panel: with the intervals and the sound block both open they are
+        // taller than the card, and the card is limited by the screen while the
+        // settings grow with the font. The bound is the share of the available
+        // card height the panel body above leaves free.
+        Flickable {
+          id: settingsFlick
           width: parent.width
-          spacing: Style.spacing.sm
+          height: Math.min(settingsBlock.implicitHeight,
+                           Math.max(200, panel.availableCardHeight * 0.42))
+          contentHeight: settingsBlock.implicitHeight
+          clip: true
+          boundsBehavior: Flickable.StopAtBounds
+          interactive: contentHeight > height
           visible: root.settingsOpen
 
-          PanelSeparator {
-            width: parent.width
-          }
-
-          PanelSectionHeader {
-            text: "INTERVALS"
-            foreground: root.textColor
-          }
-
-          Row {
-            spacing: Style.spacing.md
-
-            NumberField {
-              label: "work"
-              value: root.engine ? root.engine.workMinutes : 25
-              from: 1
-              to: 600
-              stepSize: 5
-              fieldWidth: Style.space(100)
-              foreground: root.textColor
-              onModified: function(value) { if (root.engine) root.engine.setSetting("workMinutes", value) }
-            }
-
-            NumberField {
-              label: "short"
-              value: root.engine ? root.engine.shortBreakMinutes : 5
-              from: 1
-              to: 600
-              stepSize: 1
-              fieldWidth: Style.space(100)
-              foreground: root.textColor
-              onModified: function(value) { if (root.engine) root.engine.setSetting("shortBreakMinutes", value) }
+          WheelHandler {
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onWheel: function(event) {
+              var maxY = Math.max(0, settingsFlick.contentHeight - settingsFlick.height)
+              settingsFlick.contentY = Math.max(0, Math.min(maxY, settingsFlick.contentY - event.angleDelta.y))
+              event.accepted = true
             }
           }
 
-          Row {
-            spacing: Style.spacing.md
+          Column {
+            id: settingsBlock
+            width: settingsFlick.width
+            spacing: Style.spacing.sm
 
-            NumberField {
-              label: "long"
-              value: root.engine ? root.engine.longBreakMinutes : 15
-              from: 1
-              to: 600
-              stepSize: 5
-              fieldWidth: Style.space(100)
-              foreground: root.textColor
-              onModified: function(value) { if (root.engine) root.engine.setSetting("longBreakMinutes", value) }
+            PanelSeparator {
+              width: parent.width
             }
 
-            NumberField {
-              label: "every"
-              value: root.engine ? root.engine.longBreakEvery : 4
-              from: 1
-              to: 24
-              stepSize: 1
-              fieldWidth: Style.space(100)
+            PanelSectionHeader {
+              text: "INTERVALS"
               foreground: root.textColor
-              onModified: function(value) { if (root.engine) root.engine.setSetting("longBreakEvery", value) }
             }
-          }
 
-          Text {
-            width: parent.width
-            text: "Minutes for a work block, a short break and a long break; then how many work blocks come before a long one."
-            color: Color.muted
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            wrapMode: Text.WordWrap
-            textFormat: Text.PlainText
+            Row {
+              spacing: Style.spacing.md
+
+              NumberField {
+                label: "work"
+                value: root.engine ? root.engine.workMinutes : 25
+                from: 1
+                to: 600
+                stepSize: 5
+                fieldWidth: Style.space(100)
+                foreground: root.textColor
+                onModified: function(value) { if (root.engine) root.engine.setSetting("workMinutes", value) }
+              }
+
+              NumberField {
+                label: "short"
+                value: root.engine ? root.engine.shortBreakMinutes : 5
+                from: 1
+                to: 600
+                stepSize: 1
+                fieldWidth: Style.space(100)
+                foreground: root.textColor
+                onModified: function(value) { if (root.engine) root.engine.setSetting("shortBreakMinutes", value) }
+              }
+            }
+
+            Row {
+              spacing: Style.spacing.md
+
+              NumberField {
+                label: "long"
+                value: root.engine ? root.engine.longBreakMinutes : 15
+                from: 1
+                to: 600
+                stepSize: 5
+                fieldWidth: Style.space(100)
+                foreground: root.textColor
+                onModified: function(value) { if (root.engine) root.engine.setSetting("longBreakMinutes", value) }
+              }
+
+              NumberField {
+                label: "every"
+                value: root.engine ? root.engine.longBreakEvery : 4
+                from: 1
+                to: 24
+                stepSize: 1
+                fieldWidth: Style.space(100)
+                foreground: root.textColor
+                onModified: function(value) { if (root.engine) root.engine.setSetting("longBreakEvery", value) }
+              }
+            }
+
+            Text {
+              width: parent.width
+              text: "Minutes for a work block, a short break and a long break; then how many work blocks come before a long one."
+              color: Color.muted
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+              textFormat: Text.PlainText
+            }
+
+            // ------------------------------------------------- sound
+            // The alarm has exactly two audible events — a work block ending and
+            // a task being completed — and lives entirely behind the gear, like
+            // the intervals above it.
+            PanelSeparator {
+              width: parent.width
+            }
+
+            PanelSectionHeader {
+              text: "SOUND"
+              foreground: root.textColor
+            }
+
+            Toggle {
+              width: parent.width
+              label: "Alarm sounds"
+              description: "A sound when a work block ends and when you complete a task."
+              checked: root.engine ? root.engine.soundEnabled : true
+              foreground: root.textColor
+              onClicked: if (root.engine) root.engine.setSetting("soundEnabled", !root.engine.soundEnabled)
+            }
+
+            Row {
+              spacing: Style.spacing.md
+
+              Dropdown {
+                label: "block end"
+                width: Style.space(150)
+                options: Model.SOUND_CHOICES
+                value: root.engine ? root.engine.soundBlockEnd : ""
+                foreground: root.textColor
+                onChanged: function(value) {
+                  if (root.engine) root.engine.setSetting("soundBlockEnd", value)
+                }
+              }
+
+              Dropdown {
+                label: "task done"
+                width: Style.space(150)
+                options: Model.SOUND_CHOICES
+                value: root.engine ? root.engine.soundTaskDone : ""
+                foreground: root.textColor
+                enabled: root.engine ? !root.engine.soundSameForBoth : true
+                opacity: root.engine && root.engine.soundSameForBoth ? 0.4 : 1
+                onChanged: function(value) {
+                  if (root.engine) root.engine.setSetting("soundTaskDone", value)
+                }
+              }
+            }
+
+            Row {
+              spacing: Style.spacing.md
+
+              NumberField {
+                label: "plays"
+                value: root.engine ? root.engine.soundRepeat : 2
+                from: 1
+                to: 3
+                stepSize: 1
+                fieldWidth: Style.space(100)
+                foreground: root.textColor
+                onModified: function(value) { if (root.engine) root.engine.setSetting("soundRepeat", value) }
+              }
+
+              Column {
+                width: Style.space(150)
+                spacing: Style.spacing.md
+
+                Text {
+                  text: "volume · " + Math.round(volumeSlider.liveValue) + "%"
+                  color: Qt.darker(root.textColor, 1.4)
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.bodySmall
+                  textFormat: Text.PlainText
+                }
+
+                PanelSlider {
+                  id: volumeSlider
+                  bar: root.bar
+                  width: parent.width
+                  minimum: 0
+                  maximum: 100
+                  step: 1
+                  integer: true
+                  value: root.engine ? root.engine.soundVolume : 55
+                  onReleased: function(value) {
+                    if (root.engine) root.engine.setSetting("soundVolume", Math.round(value))
+                  }
+                }
+              }
+            }
+
+            Toggle {
+              width: parent.width
+              label: "Same sound for both"
+              description: "Play the block-end sound when a task is completed too."
+              checked: root.engine ? root.engine.soundSameForBoth : false
+              foreground: root.textColor
+              onClicked: if (root.engine) root.engine.setSetting("soundSameForBoth", !root.engine.soundSameForBoth)
+            }
+
+            Text {
+              width: parent.width
+              visible: root.engine && root.engine.alarm ? !root.engine.alarm.playerAvailable : false
+              text: "No audio player found on this machine, so the alarm is silent."
+              color: Color.muted
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+              textFormat: Text.PlainText
+            }
           }
         }
       }

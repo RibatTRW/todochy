@@ -528,10 +528,58 @@ test("a settings change is one rule whoever makes it", () => {
   const deadline = idle.deadline()
   idle.configure({ workMinutes: 5 })
   assert.equal(idle.deadline(), deadline)
+  // Running also keeps the length the run was armed from, so the mid-run 5:00
+  // cannot become the length the next pause is measured against. A fresh run is
+  // used here because `idle` is already paused-partial above, and a settings
+  // change made while *paused* still re-arms the length it is measured against
+  // (a separate defect, recorded and left alone).
+  const run = loaded({ settings: { workMinutes: 50 } })
+  run.send("START")
+  const runDeadline = run.deadline()
+  run.wait(60 * 1000)
+  run.send("TICK")
+  run.configure({ workMinutes: 5 })
+  assert.equal(run.deadline(), runDeadline, "a running block keeps the deadline it started with")
+  assert.equal(run.remaining(), 49 * MIN, "and its countdown does not move")
+  run.send("PAUSE")
+  assert.equal(run.block.pausedMs, 49 * MIN)
+  run.configure({ workMinutes: 10 })
+  assert.equal(run.block.pausedMs, 49 * MIN, "the mid-run length never becomes the pause's length")
   // Unrelated phase lengths never touch the countdown.
   const other = loaded()
   other.configure({ shortBreakMinutes: 11, longBreakMinutes: 22, longBreakEvery: 9 })
   assert.equal(other.block.pausedMs, 25 * MIN)
+})
+
+test("a settings change while running keeps the length the run was armed from", () => {
+  // The defect this branch fixes, in the captain's own sequence: a block armed
+  // at 40:00, run for a minute, the interval moved to 25 mid-run, paused with
+  // 39:00 of work genuinely left, then moved to 30. The 25:00 written while the
+  // block ran used to become the length the pause was measured against, so the
+  // 39:00 was silently adopted down to 30:00.
+  const h = loaded({ now: T0, settings: { workMinutes: 40 } })
+  h.send("START")
+  h.wait(MIN)
+  h.send("TICK")
+  h.configure({ workMinutes: 25 })
+  assert.equal(h.remaining(), 39 * MIN, "the running 40:00 block keeps its deadline")
+  h.send("PAUSE")
+  assert.equal(h.remaining(), 39 * MIN, "39:00 of real work is left")
+  h.configure({ workMinutes: 30 })
+  assert.equal(h.remaining(), 39 * MIN, "and the new 30:00 does not rewrite it")
+
+  // The neighbouring cases are untouched. A block that has not started still
+  // adopts a new length, and a running block still keeps its deadline and its
+  // countdown across a change.
+  const fresh = loaded({ settings: { workMinutes: 25 } })
+  fresh.configure({ workMinutes: 50 })
+  assert.equal(fresh.block.pausedMs, 50 * MIN, "an unstarted block still adopts the new length")
+  fresh.send("START")
+  const deadline = fresh.deadline()
+  fresh.wait(30 * 1000)
+  fresh.configure({ workMinutes: 12 })
+  assert.equal(fresh.deadline(), deadline, "a running block still keeps its deadline")
+  assert.equal(fresh.remaining(), 50 * MIN - 30 * 1000, "and its countdown does not move")
 })
 
 test("an unchanged phase length is not a settings change at all", () => {

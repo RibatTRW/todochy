@@ -18,6 +18,16 @@
 // Task ids are generated at random by `Model.normalizeTask`, so task ids are
 // canonicalised to their position before comparing states. Everything else is
 // compared literally.
+//
+// ONE expectation is restated. The frozen engine re-arms the phase length on a
+// settings change even while a block is running, which lets a later change made
+// while paused shrink the work the block genuinely has left; that is the defect
+// fm/todochy-paused-block-shrink fixes, so the frozen engine is deliberately no
+// longer the oracle for that one step. A step can carry `restated` to name the
+// fields the fixed rule decides instead: the value is asserted literally, and
+// the frozen engine is then re-seated from the block, because the restated rule
+// is the only difference between them and every later step is compared
+// literally again. Only the case named below uses it.
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
@@ -81,6 +91,15 @@ function observable(effects, ignorePersist, tasks) {
     .map((e) => (e.kind === "credit" ? Object.assign({}, e, { taskId: ids.get(e.taskId) || "?" }) : e))
 }
 
+// Re-seat the frozen engine from the block after a restated step: the v1 bytes
+// it persists from here on are the block's, and `armedMs` - transient, not in
+// the bytes - comes from the block too rather than being re-derived from the
+// current settings.
+function reseatLegacy(legacy, block) {
+  legacy.loadState(Block.serialize(block))
+  legacy.lastPhaseLengthMs = block.armedMs
+}
+
 function runScript(script, options) {
   const initialSettings = Object.assign({}, (options && options.settings) || {})
   let settings = initialSettings
@@ -123,6 +142,15 @@ function runScript(script, options) {
 
     block = blockResult.block
     const label = `step ${index} ${type} @+${Math.round((entry.at - script[0].at) / 1000)}s`
+
+    if (entry.restated) {
+      Object.keys(entry.restated).forEach((field) => {
+        assert.equal(block[field], entry.restated[field], `${label}: ${field} restated from the fixed rule, not the frozen engine`)
+      })
+      reseatLegacy(legacy, block)
+      return
+    }
+
     assert.equal(canonicalize(Block.serialize(block)), canonicalize(legacy.serialized()), `${label}: persisted state`)
     assert.deepEqual(
       observable(blockResult.effects, ignorePersist, block.tasks),
@@ -163,7 +191,13 @@ test("equivalence: a settings change while running keeps the deadline and the ne
     // which is what makes the armed length observable at the next pause.
     step(T0 + 61000, { type: "SETTINGS_CHANGED", settings: { workMinutes: 25 } }),
     step(T0 + 62000, { type: "PAUSE" }),
-    step(T0 + 63000, { type: "SETTINGS_CHANGED", settings: { workMinutes: 30 } }),
+    // The pause parked 38:59 of real work (40:00 armed, parked 61s after the
+    // start). The frozen engine re-armed to the 25:00 written mid-run and so
+    // overwrites that with 30:00 here - the defect this branch fixes - so this
+    // single expectation is restated from the fixed rule, which keeps the 38:59
+    // the block actually had left. The steps after it are compared literally
+    // again (see reseatLegacy), so nothing else about the case is relaxed.
+    step(T0 + 63000, { type: "SETTINGS_CHANGED", settings: { workMinutes: 30 } }, { restated: { pausedMs: 39 * MIN - 1000 } }),
     step(T0 + 64000, { type: "SETTINGS_CHANGED", settings: { workMinutes: 26 } }),
     step(T0 + 65000, { type: "START" }),
     step(T0 + 66000, { type: "SET_SETTING", key: "workMinutes", value: 20 }),

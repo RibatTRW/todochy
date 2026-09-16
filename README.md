@@ -164,7 +164,9 @@ read-only projection of the block value onto the properties the panel binds to â
 ringing `Alarm.qml` on the work-completed effect and on a task marked complete.
 `Panel.qml` owns the UI, `Alarm.qml` owns the two audible events, and `SoundPlayer.qml` is
 the in-process player it loads â€” the only file that imports QtMultimedia, so a machine
-without that package cannot break the widget. `CONTEXT.md` has the vocabulary.
+without that package cannot break the widget. `CONTEXT.md` has the vocabulary, and
+[docs/development.md](docs/development.md) has the design invariants, the checks to run, and
+how to test a change against the running shell.
 
 To lint against the installed shell, an import root shaped like the `qs.*` module names is
 needed, because the shell's module directories are `shell/Commons` and `shell/Ui` while the

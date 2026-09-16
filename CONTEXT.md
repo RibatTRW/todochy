@@ -37,3 +37,8 @@ speaks the plugin contract's (`barWidget`, `defaults`, `schema`).
 `test/equivalence.test.mjs` compares `Block.js` against a frozen copy of the
 engine as it behaved before the refactor (`test/engine-reference.mjs`). If those
 two disagree, a user-visible behaviour has changed.
+
+`docs/development.md` holds the invariants this vocabulary implies (the frozen
+`state.json` schema, why the derived surface must not read the clock, the QML
+`.import` constraint), the checks to run, and how to test against the running
+shell.

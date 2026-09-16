@@ -38,6 +38,18 @@ Panel {
   // recounts on its own binding.
   readonly property int tasksDone: engine ? engine.tasksDone : 0
 
+  // The card is capped by KeyboardPanel at the smaller of the screen allowance
+  // and this height, so the cap — not the column's own height — decides how
+  // much room the panel gets. Named here because the settings viewport below
+  // has to measure itself against the same number.
+  readonly property int cardHeightCap: Style.space(620)
+  // The room the card's content box then has, border and padding removed.
+  // `availableCardHeight` is 0 until the panel knows its screen; the cap is
+  // the honest answer then, matching fittedContentHeight's own fallback.
+  readonly property real cardContentHeight: Math.max(0,
+    Math.min(panel.availableCardHeight > 0 ? panel.availableCardHeight : root.cardHeightCap,
+             root.cardHeightCap) - panel.verticalContentInset)
+
   function dots(count) {
     var text = ""
     for (var i = 0; i < count; i++) text += "●"
@@ -58,7 +70,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(340))
-    contentHeight: panel.fittedContentHeight(content.implicitHeight, Style.space(620))
+    contentHeight: panel.fittedContentHeight(content.implicitHeight, root.cardHeightCap)
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -333,13 +345,16 @@ Panel {
         // The settings scroll inside a bounded viewport instead of growing the
         // panel: with the intervals and the sound block both open they are
         // taller than the card, and the card is limited by the screen while the
-        // settings grow with the font. The bound is the share of the available
-        // card height the panel body above leaves free.
+        // settings grow with the font. The bound is exactly what the capped
+        // card has left below the fixed body — `y` is that body, since the
+        // column has already laid every item above this one out. Measuring it
+        // against the card cap instead of a share of the screen is what keeps
+        // the tail of the settings inside the border.
         Flickable {
           id: settingsFlick
           width: parent.width
           height: Math.min(settingsBlock.implicitHeight,
-                           Math.max(200, panel.availableCardHeight * 0.42))
+                           Math.max(0, root.cardContentHeight - y))
           contentHeight: settingsBlock.implicitHeight
           clip: true
           boundsBehavior: Flickable.StopAtBounds

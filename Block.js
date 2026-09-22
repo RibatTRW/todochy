@@ -31,10 +31,11 @@
 //
 // The block value is the state.json v1 shape plus `armedMs`. `armedMs` is
 // deliberately not persisted: it is re-armed from the settings on every load,
-// every phase transition and every settings change received while the block is
-// not running. A change that arrives mid-run leaves it untouched, so the length
-// the run was armed from stays put. serialize() writes v1
-// byte-for-byte, and the round-trip test in test/block.test.mjs pins it.
+// every phase transition, and every settings change that finds the block idle
+// or paused at its full length. A change that arrives mid-run, or at a paused
+// block holding partial progress, leaves it untouched, so neither the length a
+// run was armed from nor a kept remainder can be rewritten. serialize() writes
+// v1 byte-for-byte, and the round-trip test in test/block.test.mjs pins it.
 
 // A run that expired while the shell was down still completes, but only if it
 // expired recently: waking up a week later must not credit a week-old block.
@@ -127,15 +128,18 @@ function cyclePosition(cycleBlocks, every) {
 
 // ---------------------------------------------------------------- arming
 
-// A settings change while a block is idle: a block still at its full length
-// adopts the new length, one with partial progress keeps its remaining time.
-function pausedMsAfterSettingsChange(remaining, oldPhaseLength, newPhaseLength) {
-  var r = Number(remaining)
-  if (!isFinite(r) || r <= 0) return newPhaseLength
-  var old = Number(oldPhaseLength)
-  if (!isFinite(old) || old <= 0) return newPhaseLength
-  if (r >= old) return newPhaseLength
-  return r
+// May a settings change adopt a new length into this block? Only into one that
+// holds no progress of its own: fresh (nothing armed or nothing held), or
+// paused at exactly the full length it was armed from. Any other held value is
+// time the block earned — 40:00 armed with 39:00 left is work done, and a held
+// time above the armed length is a remainder the settings moved out from under
+// — so the change must not touch the block at all.
+function canAdoptLength(block) {
+  var armed = Number(block.armedMs)
+  if (!isFinite(armed) || armed <= 0) return true
+  var remaining = Number(block.pausedMs)
+  if (!isFinite(remaining) || remaining <= 0) return true
+  return remaining === armed
 }
 
 // ---------------------------------------------------------------- days
@@ -366,25 +370,33 @@ function tick(block, now, ctx) {
 
 // A settings change reaches the engine from two places — the panel's fields and
 // `omarchy bar set` / an edited shell.json — and both arrive as the settings
-// value itself changing. This is the single handler for that invariant: an idle
-// block still at its full length adopts the new length, a paused block with
-// partial progress keeps its remaining time, and a running block keeps the
-// deadline it started with.
+// value itself changing. This is the single handler for that invariant: a
+// fresh or idle block adopts the new length, a paused block with partial
+// progress keeps its remaining time, and a running block keeps the deadline it
+// started with. The README promises all three, so the first two are guarded
+// together: `armedMs` is what the pause rule measures "has this block started?"
+// against, and it stays put whenever the block itself stays put.
 //
-// A running block also keeps the length it was armed from. `armedMs` is what
-// the pause rule measures "has this block started?" against, so re-arming it
-// mid-run would let a shorter value written while the user was working become
-// the paused block's length: 40:00 armed, 39:00 genuinely left, the settings
-// moved to 25 mid-run and then to 30 while paused, and the user's 39 minutes of
-// real work is silently rewritten to 30:00. The length a running block was
-// started into is a fact about that run, not a setting, so it stays put; the
-// next start, phase transition and LOAD all re-arm from the settings as before.
+// A running block keeps the length it was armed from: re-arming it mid-run
+// would let a shorter value written while the user was working become the
+// paused block's length (40:00 armed, 39:00 genuinely left, the settings moved
+// to 25 mid-run, and the later pause is measured against 25).
+//
+// A paused block with partial progress likewise keeps its remainder *and* the
+// length it was armed from — the block is returned untouched, so there is
+// nothing to persist. Re-arming only the length here would set the same trap
+// one change later: 39:00 kept across a change to 30, `armedMs` silently
+// rewritten to 30:00, and the next change to 20 then adopts 20:00 over the
+// user's real work. The change instead lands at the next arming: the next
+// start resumes the kept remainder, and LOAD, a phase transition and a reset
+// all re-arm from the settings as before.
 function settingsChanged(block, settings) {
   if (block.running === true) return unchanged(block)
+  if (!canAdoptLength(block)) return unchanged(block)
   var length = model().phaseLengthMs(settings, block.phase)
   if (length === block.armedMs) return unchanged(block)
   var next = copy(block)
-  next.pausedMs = pausedMsAfterSettingsChange(block.pausedMs, block.armedMs, length)
+  next.pausedMs = length
   next.armedMs = length
   return { block: next, effects: [{ kind: "persist" }] }
 }

@@ -16,7 +16,7 @@ word the code already uses instead of inventing a second one.
 | **effects** | The work outside the module, returned as data: `persist`, `notify`, `credit`. The caller performs them. | `Block.js` → `Engine.qml` |
 | **catch-up** | A block that expired while the shell was down completes on load if it expired within six hours; anything older is abandoned and never credited. | `Block.js` |
 | **streak** | Consecutive local days each with at least one completed work block. A missed day is a hard reset to 1. | `Block.js` / `Model.js` |
-| **settings change** | The settings value changing, from the panel's fields or from `omarchy bar set`. One rule for both: a fresh block adopts the new length, a paused one keeps its remaining time, a running one keeps its deadline — and the length it was armed from, so a shorter value written mid-run can never shrink a later pause. | `Block.js` |
+| **settings change** | The settings value changing, from the panel's fields or from `omarchy bar set`. One rule for both: a fresh or idle block adopts the new length, a paused one with progress keeps its remaining time *and* the length it was armed from, a running one keeps its deadline and its arm — so a settings change can never rewrite progress that is real work, however many of them arrive. | `Block.js` |
 | **seam** | `Block.reduce(block, event, ctx)`. The one place the lifecycle can be entered and the one place it can be wrong. | `Block.js` |
 | **adapter** | The shell-side work the lifecycle cannot do: the ticker, `state.json`, the notification process, the widget's settings entry. | `Engine.qml` |
 | **projection** | The read-only view of the block value that `Panel.qml` and `BarWidget.qml` bind to (`engine.tasks`, `engine.running`, …). | `Engine.qml` |

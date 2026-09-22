@@ -529,10 +529,10 @@ test("a settings change is one rule whoever makes it", () => {
   idle.configure({ workMinutes: 5 })
   assert.equal(idle.deadline(), deadline)
   // Running also keeps the length the run was armed from, so the mid-run 5:00
-  // cannot become the length the next pause is measured against. A fresh run is
-  // used here because `idle` is already paused-partial above, and a settings
-  // change made while *paused* still re-arms the length it is measured against
-  // (a separate defect, recorded and left alone).
+  // cannot become the length the next pause is measured against. A fresh run
+  // keeps this half independent of `idle`'s paused-partial steps above; a
+  // settings change made while paused no longer re-arms the length it is
+  // measured against either — that residual is fixed and pinned below.
   const run = loaded({ settings: { workMinutes: 50 } })
   run.send("START")
   const runDeadline = run.deadline()
@@ -580,6 +580,55 @@ test("a settings change while running keeps the length the run was armed from", 
   fresh.configure({ workMinutes: 12 })
   assert.equal(fresh.deadline(), deadline, "a running block still keeps its deadline")
   assert.equal(fresh.remaining(), 50 * MIN - 30 * 1000, "and its countdown does not move")
+})
+
+test("a settings change adopts a new length only into a block that holds no progress", () => {
+  // The residual recorded by fm/todochy-paused-block-shrink, in the captain's
+  // sequence: a pause with 39:00 genuinely left survives the first change, but
+  // that change used to re-arm the length the pause was measured against, so
+  // the *next* change adopted the kept remainder down to 20:00. A remainder
+  // that is real work must never be rewritten, however many changes arrive.
+  const h = loaded({ now: T0, settings: { workMinutes: 40 } })
+  h.send("START")
+  h.wait(MIN)
+  h.send("TICK")
+  h.send("PAUSE")
+  assert.equal(h.remaining(), 39 * MIN, "39:00 of real work is left")
+
+  const before = h.block
+  const first = h.configure({ workMinutes: 30 })
+  assert.equal(h.remaining(), 39 * MIN, "a smaller interval keeps the remainder")
+  assert.equal(first.block, before, "the block value is returned untouched")
+  assert.deepEqual(first.effects, [], "and an ignored change has nothing to persist")
+
+  h.configure({ workMinutes: 20 })
+  assert.equal(h.remaining(), 39 * MIN, "the next change cannot rewrite it either")
+  h.configure({ workMinutes: 25 })
+  assert.equal(h.remaining(), 39 * MIN, "however many changes follow")
+  assert.equal(h.block.armedMs, 40 * MIN, "the block keeps the length it was armed from")
+
+  // A block with no progress adopts the new length: fresh/idle at its full
+  // length, smaller or larger, whether it never started or was paused the
+  // moment it started.
+  const idle = loaded({ settings: { workMinutes: 25 } })
+  const adopted = idle.configure({ workMinutes: 20 })
+  assert.equal(idle.block.pausedMs, 20 * MIN, "a fresh block adopts a smaller length")
+  assert.deepEqual(adopted.effects, [{ kind: "persist" }], "an adopted change is persisted")
+  idle.send("START")
+  idle.send("PAUSE") // paused immediately, so still at its full length
+  assert.equal(idle.block.pausedMs, 20 * MIN)
+  idle.configure({ workMinutes: 50 })
+  assert.equal(idle.block.pausedMs, 50 * MIN, "a block paused at its full length adopts too")
+
+  // A running block is unaffected: same deadline, same countdown, same arm.
+  const run = loaded({ settings: { workMinutes: 40 } })
+  run.send("START")
+  run.wait(MIN)
+  const result = run.configure({ workMinutes: 20 })
+  assert.equal(run.deadline(), T0 + 40 * MIN, "the deadline is untouched")
+  assert.equal(run.remaining(), 39 * MIN, "the countdown does not move")
+  assert.equal(run.block.armedMs, 40 * MIN, "the armed length does not move")
+  assert.deepEqual(result.effects, [], "and there is nothing to persist while running")
 })
 
 test("an unchanged phase length is not a settings change at all", () => {

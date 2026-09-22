@@ -13,7 +13,11 @@
 // the reactive settings handler, once from its inline re-arm) and the new one
 // writes once. A redundant atomic rewrite of identical bytes is not visible to
 // a user; everything else must match exactly, which is why the state bytes are
-// compared on every step without exception.
+// compared on every step without exception. Two SETTINGS_CHANGED steps carry
+// the same `ignorePersist` flag for the same reason: the fixed paused rule
+// (below) returns the block untouched where the frozen engine "persists" a
+// rewrite of byte-identical state, so only that redundant effect is dropped
+// there — the state bytes on those steps are still compared literally.
 //
 // Task ids are generated at random by `Model.normalizeTask`, so task ids are
 // canonicalised to their position before comparing states. Everything else is
@@ -170,7 +174,10 @@ test("equivalence: fresh load, pause, an unrelated and a related settings change
     step(T0 + 32000, { type: "TICK" }),
     step(T0 + 32000, { type: "PAUSE" }),
     step(T0 + 33000, { type: "SETTINGS_CHANGED", settings: { shortBreakMinutes: 7 } }),
-    step(T0 + 34000, { type: "SETTINGS_CHANGED", settings: { workMinutes: 40 } }),
+    // The paused block holds 24:30 of a 25:00 arm, so the fixed rule returns it
+    // untouched — while the frozen engine "persists" a rewrite of the very same
+    // bytes. Only that redundant effect is dropped; the state is compared.
+    step(T0 + 34000, { type: "SETTINGS_CHANGED", settings: { workMinutes: 40 } }, { ignorePersist: true }),
     step(T0 + 35000, { type: "START" }),
     step(T0 + 95000, { type: "PAUSE" }),
     step(T0 + 96000, { type: "SET_SETTING", key: "workMinutes", value: 25 }),
@@ -198,7 +205,10 @@ test("equivalence: a settings change while running keeps the deadline and the ne
     // the block actually had left. The steps after it are compared literally
     // again (see reseatLegacy), so nothing else about the case is relaxed.
     step(T0 + 63000, { type: "SETTINGS_CHANGED", settings: { workMinutes: 30 } }, { restated: { pausedMs: 39 * MIN - 1000 } }),
-    step(T0 + 64000, { type: "SETTINGS_CHANGED", settings: { workMinutes: 26 } }),
+    // Still 38:59 of real work against a 40:00 arm, so this change is ignored
+    // outright too: untouched block, nothing to persist, while the frozen
+    // engine (re-seated above to the block's arm) rewrites identical bytes.
+    step(T0 + 64000, { type: "SETTINGS_CHANGED", settings: { workMinutes: 26 } }, { ignorePersist: true }),
     step(T0 + 65000, { type: "START" }),
     step(T0 + 66000, { type: "SET_SETTING", key: "workMinutes", value: 20 }),
     step(T0 + 67000, { type: "PAUSE" })
